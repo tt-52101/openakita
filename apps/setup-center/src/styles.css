@@ -3213,3 +3213,89 @@ button:disabled {
   0% { transform: scale(0.85); opacity: 0.8; }
   100% { transform: scale(1.4); opacity: 0; }
 }
+
+/* ── Sub-Agent collaboration strip ── */
+.subAgentStrip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(124,58,237,0.06), rgba(59,130,246,0.06));
+  border: 1px solid rgba(124,58,237,0.12);
+  animation: subStripFadeIn 0.3s ease;
+}
+@keyframes subStripFadeIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.subAgentLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--brand, #7c3aed);
+  opacity: 0.7;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.subAgentChip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 4px;
+  border-radius: 14px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  animation: subChipIn 0.25s ease both;
+}
+@keyframes subChipIn {
+  from { opacity: 0; transform: scale(0.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+.subAgentActive {
+  background: rgba(59,130,246,0.1);
+  border: 1px solid rgba(59,130,246,0.25);
+  color: #3b82f6;
+}
+.subAgentDone {
+  background: rgba(16,185,129,0.08);
+  border: 1px solid rgba(16,185,129,0.2);
+  color: #10b981;
+}
+.subAgentError {
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.2);
+  color: #ef4444;
+}
+.subAgentChipIcon {
+  font-size: 13px;
+  line-height: 1;
+}
+.subAgentChipName {
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.subAgentSpinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(59,130,246,0.2);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: subSpin 0.8s linear infinite;
+}
+@keyframes subSpin {
+  to { transform: rotate(360deg); }
+}
+.subAgentCheck {
+  font-size: 11px;
+  font-weight: 700;
+  color: #10b981;
+}
+.subAgentCross {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ef4444;
+}

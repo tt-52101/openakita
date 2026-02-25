@@ -191,6 +191,7 @@ class AgentTracer:
         self._exporters: list[Any] = []  # TraceExporter instances
         self._current_trace: Trace | None = None
         self._span_stack: list[Span] = []
+        self._trace_stack: list[tuple[Trace | None, list[Span]]] = []
 
     @property
     def enabled(self) -> bool:
@@ -215,6 +216,9 @@ class AgentTracer:
             yield Trace(trace_id="", session_id=session_id, start_time=time.time())
             return
 
+        saved_trace = self._current_trace
+        saved_stack = self._span_stack
+
         trace = Trace(
             trace_id=str(uuid.uuid4()),
             session_id=session_id,
@@ -229,8 +233,8 @@ class AgentTracer:
         finally:
             trace.finish()
             self._export_trace(trace)
-            self._current_trace = None
-            self._span_stack = []
+            self._current_trace = saved_trace
+            self._span_stack = saved_stack
 
     def start_span(
         self,
@@ -293,7 +297,8 @@ class AgentTracer:
             span.set_error(str(e))
             raise
         finally:
-            self._span_stack.pop()
+            if self._span_stack:
+                self._span_stack.pop()
             span.finish()
 
     @contextmanager
@@ -358,6 +363,10 @@ class AgentTracer:
         if not self._enabled:
             return None
 
+        # Save parent trace context so nested begin_trace (e.g. from sub-agent delegation)
+        # doesn't destroy the parent's span stack.
+        self._trace_stack.append((self._current_trace, self._span_stack))
+
         trace = Trace(
             trace_id=str(uuid.uuid4()),
             session_id=session_id,
@@ -382,8 +391,13 @@ class AgentTracer:
 
         self._current_trace.finish()
         self._export_trace(self._current_trace)
-        self._current_trace = None
-        self._span_stack = []
+
+        # Restore parent trace context
+        if self._trace_stack:
+            self._current_trace, self._span_stack = self._trace_stack.pop()
+        else:
+            self._current_trace = None
+            self._span_stack = []
 
     def _export_trace(self, trace: Trace) -> None:
         """导出 Trace 到所有已注册的导出器"""

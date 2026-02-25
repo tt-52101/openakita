@@ -6,7 +6,9 @@ Only registered when settings.multi_agent_enabled is True.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -24,9 +26,9 @@ DYNAMIC_AGENT_POLICIES = {
 
 
 class AgentToolHandler:
-    """Handles delegate_to_agent and create_agent tool calls."""
+    """Handles delegate_to_agent, delegate_parallel, and create_agent tool calls."""
 
-    TOOLS = ["delegate_to_agent", "create_agent"]
+    TOOLS = ["delegate_to_agent", "delegate_parallel", "create_agent"]
 
     def __init__(self, agent: Agent):
         self.agent = agent
@@ -34,6 +36,8 @@ class AgentToolHandler:
     async def handle(self, tool_name: str, params: dict[str, Any]) -> str:
         if tool_name == "delegate_to_agent":
             return await self._delegate(params)
+        elif tool_name == "delegate_parallel":
+            return await self._delegate_parallel(params)
         elif tool_name == "create_agent":
             return await self._create(params)
         return f"❌ Unknown agent tool: {tool_name}"
@@ -82,6 +86,63 @@ class AgentToolHandler:
             return f"❌ Delegation to {agent_id} failed: {e}"
 
     # ------------------------------------------------------------------
+    # delegate_parallel
+    # ------------------------------------------------------------------
+
+    async def _delegate_parallel(self, params: dict[str, Any]) -> str:
+        import asyncio
+
+        tasks_param = params.get("tasks")
+        if not tasks_param or not isinstance(tasks_param, list):
+            return "❌ tasks is required and must be a list"
+        if len(tasks_param) < 2:
+            return "❌ delegate_parallel requires at least 2 tasks (use delegate_to_agent for single)"
+        if len(tasks_param) > 5:
+            return "❌ Maximum 5 parallel delegations allowed"
+
+        orchestrator = self._get_orchestrator()
+        if orchestrator is None:
+            return "❌ Orchestrator not available"
+
+        session = getattr(self.agent, "_current_session", None)
+        if session is None:
+            return "❌ No active session"
+
+        current_agent = getattr(
+            getattr(session, "context", None), "agent_profile_id", "default"
+        ) or "default"
+
+        async def _run_one(task: dict) -> tuple[str, str]:
+            agent_id = (task.get("agent_id") or "").strip()
+            message = (task.get("message") or "").strip()
+            reason = (task.get("reason") or "").strip()
+            if not agent_id or not message:
+                return agent_id or "?", "❌ agent_id and message are required"
+            logger.info(
+                f"[AgentToolHandler] Parallel delegation: {current_agent} -> {agent_id} | reason={reason}"
+            )
+            try:
+                result = await orchestrator.delegate(
+                    session=session,
+                    from_agent=current_agent,
+                    to_agent=agent_id,
+                    message=message,
+                    reason=reason,
+                )
+                return agent_id, str(result)
+            except Exception as e:
+                logger.error(f"[AgentToolHandler] Parallel delegation to {agent_id} failed: {e}")
+                return agent_id, f"❌ Failed: {e}"
+
+        coros = [_run_one(t) for t in tasks_param]
+        results = await asyncio.gather(*coros, return_exceptions=False)
+
+        parts = []
+        for agent_id, result in results:
+            parts.append(f"## Agent: {agent_id}\n{result}")
+        return "\n\n---\n\n".join(parts)
+
+    # ------------------------------------------------------------------
     # create_agent
     # ------------------------------------------------------------------
 
@@ -117,8 +178,14 @@ class AgentToolHandler:
         from ...config import settings
 
         session_key = getattr(session, "session_key", "") or getattr(session, "id", "")
-        short_key = str(session_key)[:8] if session_key else "anon"
-        profile_id = f"dynamic_{name.lower().replace(' ', '_')}_{short_key}"
+        raw_key = str(session_key)[:12] if session_key else "anon"
+        short_key = re.sub(r"[^a-z0-9_]", "", raw_key.lower()) or "anon"
+        short_key = short_key[:8]
+        raw = name.lower().replace(" ", "_")
+        safe_name = re.sub(r"[^a-z0-9_]", "", raw)
+        if not safe_name:
+            safe_name = hashlib.md5(name.encode("utf-8")).hexdigest()[:8]
+        profile_id = f"dynamic_{safe_name}_{short_key}"
 
         profile = AgentProfile(
             id=profile_id,

@@ -91,18 +91,25 @@ export function AgentDashboardView({
     if (visible && multiAgentEnabled) fetchData();
   }, [visible, multiAgentEnabled, fetchData]);
 
-  // Auto-refresh health stats every 15s
+  // Auto-refresh profiles + health every 10s so dynamic agents appear quickly
   useEffect(() => {
     if (!visible || !multiAgentEnabled) return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${apiBaseUrl}/api/agents/health`);
-        if (res.ok) {
-          const data = await res.json();
+        const [profileRes, healthRes] = await Promise.all([
+          fetch(`${apiBaseUrl}/api/agents/profiles`).catch(() => null),
+          fetch(`${apiBaseUrl}/api/agents/health`).catch(() => null),
+        ]);
+        if (profileRes?.ok) {
+          const data = await profileRes.json();
+          setProfiles(data.profiles || []);
+        }
+        if (healthRes?.ok) {
+          const data = await healthRes.json();
           setHealth(data.health || {});
         }
       } catch { /* silent */ }
-    }, 15000);
+    }, 10000);
     return () => clearInterval(interval);
   }, [visible, multiAgentEnabled, apiBaseUrl]);
 
@@ -174,10 +181,12 @@ export function AgentDashboardView({
             const h = health[agent.id];
             const botCount = bots.filter(b => b.agent_profile_id === agent.id).length;
             const isHovered = hoveredAgent === agent.id;
+            const isActive = h && (h.pending_messages > 0 || h.total_requests > 0);
+            const isDynamic = agent.type === "dynamic";
             return (
               <div
                 key={agent.id}
-                className={`dash-agent-card ${isHovered ? "hovered" : ""}`}
+                className={`dash-agent-card ${isHovered ? "hovered" : ""} ${isActive ? "active" : ""}`}
                 style={{ "--agent-color": agent.color || "#3b82f6" } as React.CSSProperties}
                 onMouseEnter={() => setHoveredAgent(agent.id)}
                 onMouseLeave={() => setHoveredAgent(null)}
@@ -185,11 +194,17 @@ export function AgentDashboardView({
                 <div className="dash-agent-card-glow" />
                 <div className="dash-agent-card-inner">
                   <div className="dash-agent-card-header">
-                    <div className="dash-agent-icon" style={{ background: hexToRgba(agent.color || "#3b82f6", 0.15) }}>
+                    <div className="dash-agent-icon" style={{ background: hexToRgba(agent.color || "#3b82f6", 0.15), position: "relative" }}>
                       <span>{agent.icon}</span>
+                      {h && h.pending_messages > 0 && (
+                        <span className="dash-agent-active-dot" />
+                      )}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="dash-agent-name">{agent.name}</div>
+                      <div className="dash-agent-name">
+                        {agent.name}
+                        {isDynamic && <span className="dash-agent-dynamic-badge">动态</span>}
+                      </div>
                       <div className="dash-agent-id">{agent.id}</div>
                     </div>
                     {botCount > 0 && (
@@ -747,6 +762,26 @@ function DashStyles() {
 
       @keyframes pulse-text { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
       .pulse-text { animation: pulse-text 1.5s ease-in-out infinite; }
+
+      .dash-agent-active-dot {
+        position: absolute; top: 2px; right: 2px;
+        width: 8px; height: 8px; border-radius: 50%;
+        background: #10b981;
+        box-shadow: 0 0 6px #10b981;
+        animation: pulse-text 1.2s ease-in-out infinite;
+      }
+      .dash-agent-dynamic-badge {
+        display: inline-block; margin-left: 6px;
+        padding: 1px 6px; border-radius: 6px;
+        font-size: 9px; font-weight: 600;
+        background: rgba(124,58,237,0.1);
+        color: #7c3aed; letter-spacing: 0.3px;
+        vertical-align: middle;
+      }
+      .dash-agent-card.active .dash-agent-card-inner {
+        border-color: var(--agent-color);
+        box-shadow: 0 0 12px rgba(var(--agent-color), 0.15);
+      }
 
       /* Bot cards */
       .dash-bot-grid {

@@ -1514,6 +1514,10 @@ export function ChatView({
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const agentMenuRef = useRef<HTMLDivElement | null>(null);
 
+  // Track active sub-agents in the current conversation (populated via agent_handoff events)
+  type SubAgentEntry = { agentId: string; status: "delegating" | "done" | "error"; reason?: string; startTime: number };
+  const [activeSubAgents, setActiveSubAgents] = useState<SubAgentEntry[]>([]);
+
   const updateConvStatus = useCallback((convId: string, status: ConversationStatus) => {
     setConversations((prev) =>
       prev.map((c) => c.id === convId ? { ...c, status, timestamp: Date.now() } : c)
@@ -1661,6 +1665,7 @@ export function ChatView({
       }
     }
     prevConvIdRef.current = activeConvId;
+    setActiveSubAgents([]);
   }, [activeConvId, serviceRunning, apiBaseUrl, multiAgentEnabled, conversations]);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -2383,6 +2388,33 @@ export function ChatView({
                 currentContent += event.content;
                 break;
               case "tool_call_start": {
+                // Eagerly add sub-agent when delegate_to_agent starts
+                if (event.tool === "delegate_to_agent" && event.args?.agent_id) {
+                  const targetId = String(event.args.agent_id);
+                  setActiveSubAgents((prev) => {
+                    const exists = prev.find((s) => s.agentId === targetId);
+                    if (exists) return prev.map((s) => s.agentId === targetId ? { ...s, status: "delegating", startTime: Date.now() } : s);
+                    return [...prev, { agentId: targetId, status: "delegating" as const, reason: String(event.args.reason || ""), startTime: Date.now() }];
+                  });
+                }
+                // Eagerly add all sub-agents when delegate_parallel starts
+                if (event.tool === "delegate_parallel" && Array.isArray(event.args?.tasks)) {
+                  setActiveSubAgents((prev) => {
+                    let updated = [...prev];
+                    for (const task of event.args.tasks as Array<{ agent_id?: string; reason?: string }>) {
+                      if (!task.agent_id) continue;
+                      const targetId = String(task.agent_id);
+                      const exists = updated.find((s) => s.agentId === targetId);
+                      if (exists) {
+                        updated = updated.map((s) => s.agentId === targetId ? { ...s, status: "delegating" as const, startTime: Date.now() } : s);
+                      } else {
+                        updated.push({ agentId: targetId, status: "delegating" as const, reason: String(task.reason || ""), startTime: Date.now() });
+                      }
+                    }
+                    return updated;
+                  });
+                }
+                
                 currentToolCalls = [...currentToolCalls, { tool: event.tool, args: event.args, status: "running", id: event.id }];
                 const _tcId = event.id || genId();
                 const _desc = formatToolDescription(event.tool, event.args);
@@ -2399,6 +2431,20 @@ export function ChatView({
                 break;
               }
               case "tool_call_end": {
+                // Mark sub-agent as done/error when delegate completes
+                if (event.tool === "delegate_to_agent" || event.tool === "delegate_parallel") {
+                  const isErr = event.is_error === true || (event.result || "").startsWith("❌");
+                  setActiveSubAgents((prev) => prev.map((s) =>
+                    s.status === "delegating" ? { ...s, status: isErr ? "error" : "done" } : s
+                  ));
+                }
+                // Refresh profiles when a new agent is created
+                if (event.tool === "create_agent" && !(event.is_error || (event.result || "").startsWith("❌"))) {
+                  fetch(`${apiBase}/api/agents/profiles`)
+                    .then((r) => r.ok ? r.json() : null)
+                    .then((data) => { if (data?.profiles) setAgentProfiles(data.profiles); })
+                    .catch(() => {});
+                }
                 let matched = false;
                 currentToolCalls = currentToolCalls.map((tc) => {
                   if (matched) return tc;
@@ -2509,17 +2555,27 @@ export function ChatView({
                   size: event.size,
                 }];
                 break;
-              case "agent_handoff":
+              case "agent_handoff": {
+                const toProfile = agentProfiles.find((p) => p.id === event.to_agent);
+                const fromProfile = agentProfiles.find((p) => p.id === event.from_agent);
+                const toName = toProfile ? `${toProfile.icon} ${toProfile.name}` : event.to_agent;
+                const fromName = fromProfile ? `${fromProfile.icon} ${fromProfile.name}` : event.from_agent;
                 setMessages((prev) => [
                   ...prev,
                   {
                     id: genId(),
                     role: "system",
-                    content: `🔄 ${event.from_agent} → ${event.to_agent}${event.reason ? `: ${event.reason}` : ""}`,
+                    content: `🔄 **${fromName}** 委派任务给 **${toName}**${event.reason ? `\n> ${event.reason}` : ""}`,
                     timestamp: Date.now(),
                   },
                 ]);
+                setActiveSubAgents((prev) => {
+                  const exists = prev.find((s) => s.agentId === event.to_agent);
+                  if (exists) return prev.map((s) => s.agentId === event.to_agent ? { ...s, status: "delegating", startTime: Date.now() } : s);
+                  return [...prev, { agentId: event.to_agent, status: "delegating", reason: event.reason, startTime: Date.now() }];
+                });
                 break;
+              }
               case "agent_switch":
                 currentAgent = event.agentName;
                 setMessages((prev) => {
@@ -3323,6 +3379,29 @@ export function ChatView({
                     </button>
                   );
                 })}
+            </div>
+          )}
+
+          {/* Active sub-agents in current conversation */}
+          {multiAgentEnabled && activeSubAgents.length > 0 && (
+            <div className="subAgentStrip">
+              <span className="subAgentLabel">协作中</span>
+              {activeSubAgents.map((sub) => {
+                const sp = agentProfiles.find((p) => p.id === sub.agentId);
+                return (
+                  <div
+                    key={sub.agentId}
+                    className={`subAgentChip ${sub.status === "delegating" ? "subAgentActive" : sub.status === "error" ? "subAgentError" : "subAgentDone"}`}
+                    title={sp?.name || sub.agentId}
+                  >
+                    <span className="subAgentChipIcon">{sp?.icon || "🤖"}</span>
+                    <span className="subAgentChipName">{sp?.name || sub.agentId}</span>
+                    {sub.status === "delegating" && <span className="subAgentSpinner" />}
+                    {sub.status === "done" && <span className="subAgentCheck">✓</span>}
+                    {sub.status === "error" && <span className="subAgentCross">✗</span>}
+                  </div>
+                );
+              })}
             </div>
           )}
 

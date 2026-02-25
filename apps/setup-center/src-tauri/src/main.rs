@@ -2226,28 +2226,31 @@ fn main() {
                 }
             }
 
-            // ── 自动拉起后端（所有启动模式都生效） ──
+            // ── 自动拉起后端（仅 release 模式生效） ──
             // 如果有已配置的工作区且后端未在运行，则自动启动后端。
+            // dev 模式（cargo tauri dev）跳过，避免与手动启动的开发后端冲突。
             // 前端通过 is_backend_auto_starting 查询此状态，
             // 在启动期间显示提示并禁用启动/重启按钮。
-            let state = read_state_file();
-            if let Some(ref ws_id) = state.current_workspace_id {
-                let port = read_workspace_api_port(ws_id).unwrap_or(18900);
-                let already_running = reqwest::blocking::Client::builder()
-                    .timeout(std::time::Duration::from_secs(2))
-                    .build()
-                    .ok()
-                    .and_then(|c| c.get(format!("http://127.0.0.1:{}/api/health", port)).send().ok())
-                    .map(|r| r.status().is_success())
-                    .unwrap_or(false);
-                if !already_running {
-                    AUTO_START_IN_PROGRESS.store(true, Ordering::SeqCst);
-                    let venv_dir = openakita_root_dir().join("venv").to_string_lossy().to_string();
-                    let ws_clone = ws_id.clone();
-                    std::thread::spawn(move || {
-                        let _ = openakita_service_start(venv_dir, ws_clone);
-                        AUTO_START_IN_PROGRESS.store(false, Ordering::SeqCst);
-                    });
+            if !cfg!(debug_assertions) {
+                let state = read_state_file();
+                if let Some(ref ws_id) = state.current_workspace_id {
+                    let port = read_workspace_api_port(ws_id).unwrap_or(18900);
+                    let already_running = reqwest::blocking::Client::builder()
+                        .timeout(std::time::Duration::from_secs(2))
+                        .build()
+                        .ok()
+                        .and_then(|c| c.get(format!("http://127.0.0.1:{}/api/health", port)).send().ok())
+                        .map(|r| r.status().is_success())
+                        .unwrap_or(false);
+                    if !already_running {
+                        AUTO_START_IN_PROGRESS.store(true, Ordering::SeqCst);
+                        let venv_dir = openakita_root_dir().join("venv").to_string_lossy().to_string();
+                        let ws_clone = ws_id.clone();
+                        std::thread::spawn(move || {
+                            let _ = openakita_service_start(venv_dir, ws_clone);
+                            AUTO_START_IN_PROGRESS.store(false, Ordering::SeqCst);
+                        });
+                    }
                 }
             }
             Ok(())

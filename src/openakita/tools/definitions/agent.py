@@ -58,6 +58,63 @@ AGENT_TOOLS = [
         ],
     },
     {
+        "name": "delegate_parallel",
+        "category": "Agent",
+        "description": (
+            "Delegate tasks to multiple agents in parallel. "
+            "Use when you need to assign independent tasks to different agents simultaneously."
+        ),
+        "detail": (
+            "同时委派任务给多个 Agent 并行执行。\n\n"
+            "**适用场景**：\n"
+            "- 多个独立子任务可以同时执行（如同时搜索+分析）\n"
+            "- 需要多个 Agent 同时调研不同方向\n\n"
+            "**注意事项**：\n"
+            "- 所有任务并行执行，结果一起返回\n"
+            "- 各任务之间不能有依赖关系（有依赖请用 delegate_to_agent 串行委派）"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "agent_id": {
+                                "type": "string",
+                                "description": "目标 Agent Profile ID",
+                            },
+                            "message": {
+                                "type": "string",
+                                "description": "发送给该 Agent 的任务描述",
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": "委派原因（可选）",
+                            },
+                        },
+                        "required": ["agent_id", "message"],
+                    },
+                    "description": "要并行执行的任务列表",
+                },
+            },
+            "required": ["tasks"],
+        },
+        "examples": [
+            {
+                "scenario": "同时让两个 Agent 调研不同项目",
+                "params": {
+                    "tasks": [
+                        {"agent_id": "browser-agent", "message": "调研 OpenAkita 项目", "reason": "网络搜索"},
+                        {"agent_id": "data-analyst", "message": "分析产品数据", "reason": "数据分析"},
+                    ],
+                },
+                "expected": "两个 Agent 并行执行后合并返回结果",
+            },
+        ],
+    },
+    {
         "name": "create_agent",
         "category": "Agent",
         "description": (
