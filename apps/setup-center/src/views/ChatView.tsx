@@ -2746,19 +2746,6 @@ export function ChatView({
                 }];
                 break;
               case "agent_handoff": {
-                const toProfile = agentProfiles.find((p) => p.id === event.to_agent);
-                const fromProfile = agentProfiles.find((p) => p.id === event.from_agent);
-                const toName = toProfile ? `${toProfile.icon} ${toProfile.name}` : event.to_agent;
-                const fromName = fromProfile ? `${fromProfile.icon} ${fromProfile.name}` : event.from_agent;
-                updateMessages((prev) => [
-                  ...prev,
-                  {
-                    id: genId(),
-                    role: "system" as const,
-                    content: `🔄 **${fromName}** 委派任务给 **${toName}**${event.reason ? `\n> ${event.reason}` : ""}`,
-                    timestamp: Date.now(),
-                  },
-                ]);
                 updateSubAgents((prev) => {
                   const exists = prev.find((s) => s.agentId === event.to_agent);
                   if (exists) return prev.map((s) => s.agentId === event.to_agent ? { ...s, status: "delegating", startTime: Date.now() } : s);
