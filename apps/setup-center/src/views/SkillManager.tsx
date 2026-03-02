@@ -598,9 +598,7 @@ export function SkillManager({
         installed: skills.some((local) => {
           const nameMatch = local.name === skillId;
           const dirMatch = local.path ? local.path.replace(/\\/g, "/").split("/").pop() === skillId : false;
-          if (!nameMatch && !dirMatch) return false;
-          if (local.sourceUrl && installUrl) return local.sourceUrl === installUrl;
-          return true;
+          return nameMatch || dirMatch;
         }),
       };
     });
