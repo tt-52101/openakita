@@ -89,6 +89,32 @@ function buildChainFromSummary(summary: ChainSummaryItem[]): ChainGroup[] {
   });
 }
 
+/** 将 ask_user 的结构化回答（JSON / option ID）转为人类可读文本 */
+function formatAskUserAnswer(answer: string, askUser: ChatAskUser): string {
+  const questions: ChatAskQuestion[] = askUser.questions?.length
+    ? askUser.questions
+    : [{ id: "__single__", prompt: askUser.question, options: askUser.options }];
+  try {
+    const parsed = JSON.parse(answer);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const formatted = questions.map((q) => {
+        const val = parsed[q.id];
+        if (!val) return null;
+        const vals = Array.isArray(val) ? val : [val];
+        const labels = vals.map((v: string) => {
+          if (v.startsWith("OTHER:")) return v.slice(6);
+          return q.options?.find((o) => o.id === v)?.label ?? v;
+        });
+        return `${q.prompt}: ${labels.join(", ")}`;
+      }).filter(Boolean).join(" | ");
+      if (formatted) return formatted;
+    }
+  } catch { /* not JSON */ }
+  const opt = askUser.options?.find((o) => o.id === answer);
+  if (opt) return opt.label;
+  return answer;
+}
+
 /** 用后端数据补全本地消息中缺失的 content / thinkingChain */
 function patchMessagesWithBackend(
   localMsgs: ChatMessage[],
@@ -813,28 +839,7 @@ function AskUserBlock({ ask, onAnswer }: { ask: ChatAskUser; onAnswer: (answer: 
 
   // ─── 已回答状态 ───
   if (ask.answered) {
-    const displayAnswer = (() => {
-      // 尝试解析 JSON（多问题）
-      try {
-        const parsed = JSON.parse(ask.answer || "");
-        if (typeof parsed === "object" && !Array.isArray(parsed)) {
-          return normalizedQuestions.map((q) => {
-            const val = parsed[q.id];
-            if (!val) return null;
-            const vals = Array.isArray(val) ? val : [val];
-            const labels = vals.map((v: string) => {
-              if (v.startsWith("OTHER:")) return v.slice(6);
-              const opt = q.options?.find((o) => o.id === v);
-              return opt ? opt.label : v;
-            });
-            return `${q.prompt}: ${labels.join(", ")}`;
-          }).filter(Boolean).join(" | ");
-        }
-      } catch { /* not JSON, fall through */ }
-      // 单问题：查找选项标签
-      const answeredOpt = ask.options?.find((o) => o.id === ask.answer);
-      return answeredOpt ? answeredOpt.label : ask.answer;
-    })();
+    const displayAnswer = formatAskUserAnswer(ask.answer || "", ask);
     return (
       <div style={{ margin: "8px 0", padding: "10px 14px", borderRadius: 10, background: "rgba(14,165,233,0.06)", border: "1px solid rgba(14,165,233,0.15)" }}>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{ask.question}</div>
@@ -2033,7 +2038,8 @@ export function ChatView({
   }, []);
 
   // ── 发送消息（overrideText 用于 ask_user 回复等场景，绕过 inputText） ──
-  const sendMessage = useCallback(async (overrideText?: string) => {
+  // displayContent: 当发送给 API 的原文（如 JSON）不适合直接展示时，可指定用户气泡中的显示文本
+  const sendMessage = useCallback(async (overrideText?: string, displayContent?: string) => {
     const text = (overrideText ?? inputText).trim();
     if (!text && pendingAttachments.length === 0) return;
     if (isStreaming) return;
@@ -2055,7 +2061,7 @@ export function ChatView({
     const userMsg: ChatMessage = {
       id: genId(),
       role: "user",
-      content: text,
+      content: displayContent || text,
       attachments: pendingAttachments.length > 0 ? [...pendingAttachments] : undefined,
       timestamp: Date.now(),
     };
@@ -2634,14 +2640,18 @@ export function ChatView({
 
   // ── 处理用户回答 (ask_user) ──
   const handleAskAnswer = useCallback((msgId: string, answer: string) => {
+    const target = latestMessagesRef.current.find((m) => m.id === msgId);
+    const displayText = target?.askUser
+      ? formatAskUserAnswer(answer, target.askUser)
+      : undefined;
+
     setMessages((prev) => prev.map((m) =>
       m.id === msgId && m.askUser
         ? { ...m, askUser: { ...m.askUser, answered: true, answer } }
         : m
     ));
     // reason_stream 在 ask_user 后中断流，用户回复通过新 /api/chat 请求继续处理
-    // 直接通过 sendMessage(overrideText) 发送，无需等待 state 更新
-    sendMessage(answer);
+    sendMessage(answer, displayText !== answer ? displayText : undefined);
   }, [sendMessage]);
 
   // ── 停止生成 ──
