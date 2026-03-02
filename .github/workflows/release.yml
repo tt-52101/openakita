@@ -424,9 +424,8 @@ jobs:
           for app in "${APPS[@]}"; do
             FRAMEWORK_DIR="${app}/Contents/Resources/resources/openakita-server/_internal/Python.framework"
             if [ -d "${FRAMEWORK_DIR}" ]; then
-              SIGNED_REALPATHS=""
+              SIGNED_REALPATHS_FILE="$(mktemp)"
               for pybin in \
-                "${FRAMEWORK_DIR}/Python" \
                 "${FRAMEWORK_DIR}/Versions/3.11/Python" \
                 "${FRAMEWORK_DIR}/Versions/Current/Python" \
                 "${FRAMEWORK_DIR}/Resources/Python.app/Contents/MacOS/Python" \
@@ -434,14 +433,19 @@ jobs:
                 "${FRAMEWORK_DIR}/Versions/Current/Resources/Python.app/Contents/MacOS/Python"; do
                 if [ -f "${pybin}" ]; then
                   REAL_PYBIN="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${pybin}")"
-                  case " ${SIGNED_REALPATHS} " in
-                    *" ${REAL_PYBIN} "*) continue ;;
-                  esac
+                  if grep -Fqx -- "${REAL_PYBIN}" "${SIGNED_REALPATHS_FILE}"; then
+                    continue
+                  fi
                   echo "Re-signing Python framework binary: ${pybin} -> ${REAL_PYBIN}"
                   codesign --force --options runtime --timestamp --sign "${IDENTITY}" "${REAL_PYBIN}"
-                  SIGNED_REALPATHS="${SIGNED_REALPATHS} ${REAL_PYBIN}"
+                  printf '%s\n' "${REAL_PYBIN}" >> "${SIGNED_REALPATHS_FILE}"
                 fi
               done
+              while IFS= read -r signed_bin; do
+                [ -n "${signed_bin}" ] || continue
+                codesign --verify --strict --verbose=2 "${signed_bin}"
+              done < "${SIGNED_REALPATHS_FILE}"
+              rm -f "${SIGNED_REALPATHS_FILE}"
             fi
 
             echo "Re-signing app bundle root: ${app}"
