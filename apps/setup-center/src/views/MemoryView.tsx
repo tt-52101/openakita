@@ -392,6 +392,7 @@ export function MemoryView({ serviceRunning }: Props) {
                 <td style={{ padding: "8px 12px" }}>
                   <span style={{
                     display: "inline-block", padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 500,
+                    whiteSpace: "nowrap",
                     background: `${TYPE_COLORS[m.type] || "#6b7280"}18`,
                     color: TYPE_COLORS[m.type] || "#6b7280",
                     border: `1px solid ${TYPE_COLORS[m.type] || "#6b7280"}30`,
@@ -449,6 +450,7 @@ export function MemoryView({ serviceRunning }: Props) {
                             <span key={tag} style={{
                               padding: "1px 6px", borderRadius: 8, fontSize: 10,
                               background: "rgba(99,102,241,0.1)", color: "#6366f1",
+                              whiteSpace: "nowrap",
                             }}>
                               {tag}
                             </span>
