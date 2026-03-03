@@ -518,6 +518,10 @@ jobs:
           # Tauri creates the DMG during build (step 20) BEFORE our re-signing,
           # so the DMG contains the original Tauri-signed app without runtime
           # hardening or timestamps.  We must rebuild it.
+          #
+          # The old DMG may still be held open by diskimages-helper (macOS
+          # auto-mounts DMGs for verification). Detach all volumes and retry
+          # to avoid "Resource busy" failures.
           DMG_DIR="${BUNDLE_DIR}/dmg"
           if [ -d "${DMG_DIR}" ]; then
             for dmg_file in "${DMG_DIR}"/*.dmg; do
@@ -526,13 +530,28 @@ jobs:
                 app="${APPS[0]}"
                 app_name="$(basename "${app}" .app)"
                 echo "Recreating DMG from signed app: ${dmg_file}"
+
+                # Detach any volumes mounted from the old DMG
+                for vol in /Volumes/"${app_name}"*; do
+                  [ -d "${vol}" ] && hdiutil detach "${vol}" -force 2>/dev/null || true
+                done
+                sleep 1
+
                 rm -f "${dmg_file}"
-                hdiutil create \
-                  -volname "${app_name}" \
-                  -srcfolder "${app}" \
-                  -ov -format UDZO \
-                  "${dmg_file}"
-                echo "DMG recreated: ${dmg_file}"
+
+                # Retry up to 3 times (diskimages-helper may take a moment to release)
+                for attempt in 1 2 3; do
+                  if hdiutil create \
+                    -volname "${app_name}" \
+                    -srcfolder "${app}" \
+                    -ov -format UDZO \
+                    "${dmg_file}"; then
+                    echo "DMG recreated: ${dmg_file}"
+                    break
+                  fi
+                  echo "hdiutil create attempt ${attempt} failed, retrying in 3s..."
+                  sleep 3
+                done
               fi
             done
           fi
