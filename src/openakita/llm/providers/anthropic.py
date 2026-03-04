@@ -305,6 +305,7 @@ class AnthropicProvider(LLMProvider):
         content_blocks = []
         has_tool_calls = False
         text_content = ""  # 收集文本内容，用于检测文本格式工具调用
+        thinking_content = ""  # 收集 thinking 内容，检测嵌入的工具调用
 
         for block in data.get("content", []):
             block_type = block.get("type")
@@ -312,7 +313,9 @@ class AnthropicProvider(LLMProvider):
             if block_type == "thinking":
                 # MiniMax M2.1 Interleaved Thinking 支持
                 # 必须完整保留 thinking 块以保持思维链连续性
-                content_blocks.append(ThinkingBlock(thinking=block.get("thinking", "")))
+                raw_thinking = block.get("thinking", "")
+                thinking_content += raw_thinking
+                content_blocks.append(ThinkingBlock(thinking=raw_thinking))
             elif block_type == "text":
                 text = block.get("text", "")
                 text_content += text
@@ -329,9 +332,18 @@ class AnthropicProvider(LLMProvider):
 
         # === 文本格式工具调用解析（MiniMax 兼容） ===
         # 当模型返回文本格式的工具调用（如 <minimax:tool_call>）时，解析并转换
-        if not has_tool_calls and text_content and has_text_tool_calls(text_content):
+        # 同时检查 thinking 块内是否嵌入了工具调用（MiniMax-M2.5 已知行为）
+        combined_text_for_tool_check = text_content
+        if not has_tool_calls and not text_content and thinking_content:
+            if has_text_tool_calls(thinking_content):
+                combined_text_for_tool_check = thinking_content
+                logger.info(
+                    f"[TEXT_TOOL_PARSE] Detected tool calls embedded inside thinking block from {self.name}"
+                )
+
+        if not has_tool_calls and combined_text_for_tool_check and has_text_tool_calls(combined_text_for_tool_check):
             logger.info(f"[TEXT_TOOL_PARSE] Detected text-based tool calls from {self.name}")
-            clean_text, text_tool_calls = parse_text_tool_calls(text_content)
+            clean_text, text_tool_calls = parse_text_tool_calls(combined_text_for_tool_check)
 
             if text_tool_calls:
                 # 移除包含工具调用的文本块，替换为清理后的文本
@@ -349,7 +361,8 @@ class AnthropicProvider(LLMProvider):
                 content_blocks.extend(text_tool_calls)
                 has_tool_calls = True
                 logger.info(
-                    f"[TEXT_TOOL_PARSE] Extracted {len(text_tool_calls)} tool calls from text"
+                    f"[TEXT_TOOL_PARSE] Extracted {len(text_tool_calls)} tool calls "
+                    f"from {'thinking block' if combined_text_for_tool_check != text_content else 'text'}"
                 )
 
         # 解析停止原因

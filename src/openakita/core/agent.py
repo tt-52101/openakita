@@ -4718,6 +4718,31 @@ create_agent(name="名称", description="描述", skills=["技能"], custom_prom
                                 return result
         return ""
 
+    @staticmethod
+    def _build_tool_fallback_summary(
+        executed_tool_names: list[str],
+        delivery_receipts: list[dict],
+    ) -> str | None:
+        """当 LLM 多次未返回可见文本时，从工具执行记录构建 fallback 摘要。"""
+        parts: list[str] = []
+
+        if delivery_receipts:
+            for r in delivery_receipts:
+                desc = r.get("description") or r.get("summary") or r.get("title") or ""
+                if desc:
+                    parts.append(f"• {desc}")
+            if parts:
+                return "已完成以下操作：\n" + "\n".join(parts)
+
+        if executed_tool_names:
+            unique = list(dict.fromkeys(executed_tool_names))
+            tool_summary = "、".join(unique[:10])
+            if len(unique) > 10:
+                tool_summary += f" 等共 {len(unique)} 项"
+            return f"任务已执行完毕（使用了工具：{tool_summary}），但模型未生成文本总结。如需详情请重新提问。"
+
+        return None
+
     async def _verify_task_completion(
         self,
         user_request: str,
@@ -5174,9 +5199,9 @@ NEXT: 建议的下一步（如有）"""
         verify_incomplete_count = 0
         max_verify_retries = 3
 
-        # 工具已执行但 LLM 没给任何可见文本确认：额外再试 1 次（不计入 ForceToolCall 配额）
+        # 工具已执行但 LLM 没给任何可见文本确认：额外再试（不计入 ForceToolCall 配额）
         no_confirmation_text_count = 0
-        max_confirmation_text_retries = 1
+        max_confirmation_text_retries = 2
 
         # Track executed tool names for task completion verification
         executed_tool_names: list[str] = []
@@ -5534,6 +5559,7 @@ NEXT: 建议的下一步（如有）"""
             # 处理响应
             tool_calls = []
             text_content = ""
+            _thinking_content = ""
 
             for block in response.content:
                 if block.type == "text":
@@ -5546,6 +5572,23 @@ NEXT: 建议的下一步（如有）"""
                             "input": block.input,
                         }
                     )
+                elif getattr(block, "type", None) == "thinking":
+                    _thinking_content += getattr(block, "thinking", "") or ""
+
+            # 防御层：如果 provider 层未能从 thinking 内容中提取嵌入的工具调用
+            if not tool_calls and _thinking_content:
+                try:
+                    from ..llm.converters.tools import has_text_tool_calls, parse_text_tool_calls
+                    if has_text_tool_calls(_thinking_content):
+                        _, _embedded = parse_text_tool_calls(_thinking_content)
+                        if _embedded:
+                            for tc in _embedded:
+                                tool_calls.append({"id": tc.id, "name": tc.name, "input": tc.input})
+                            logger.warning(
+                                f"[Agent] Recovered {len(_embedded)} tool calls from thinking content"
+                            )
+                except Exception:
+                    pass
 
             # 任务监控：结束迭代
             if task_monitor:
@@ -5645,24 +5688,36 @@ NEXT: 建议的下一步（如有）"""
                                 )
                             continue
                     else:
-                        # LLM 没有返回任何可见文本：优先强制再问 1 次，让模型给出用户可见的确认/总结
+                        # LLM 没有返回任何可见文本：强制再问，让模型给出用户可见的确认/总结
                         logger.info(
                             "[ForceToolCall] Tools executed but no confirmation text, requesting confirmation..."
                         )
                         no_confirmation_text_count += 1
                         if no_confirmation_text_count <= max_confirmation_text_retries:
+                            if no_confirmation_text_count == 1:
+                                _retry_prompt = (
+                                    "[系统] 你已执行过工具，但你刚才没有输出任何用户可见的文字确认。"
+                                    "请基于已产生的 tool_result 证据，给出最终答复/交付物说明；"
+                                    "若仍需工具，请直接调用，不要空回复。"
+                                )
+                            else:
+                                _retry_prompt = (
+                                    "[系统] 警告：你已连续多次未输出可见文字。"
+                                    "请立即用一两句话简要总结你完成了什么，不要调用任何工具，不要输出思考过程。"
+                                )
                             working_messages.append(
-                                {
-                                    "role": "user",
-                                    "content": (
-                                        "[系统] 你已执行过工具，但你刚才没有输出任何用户可见的文字确认。"
-                                        "请基于已产生的 tool_result 证据，给出最终答复/交付物说明；"
-                                        "若仍需工具，请直接调用，不要空回复。"
-                                    ),
-                                }
+                                {"role": "user", "content": _retry_prompt}
                             )
                             continue
-                        # 多次空回复：直接中断并提示异常（不要再用“我理解了您的请求”）
+                        # 所有重试用尽，尝试从工具执行记录构建 fallback
+                        _fallback = self._build_tool_fallback_summary(
+                            executed_tool_names, delivery_receipts
+                        )
+                        if _fallback:
+                            logger.warning(
+                                "[ForceToolCall] LLM returned empty confirmation; using fallback summary"
+                            )
+                            return _fallback
                         logger.error(
                             "[ForceToolCall] LLM returned empty confirmation after tools executed; aborting"
                         )

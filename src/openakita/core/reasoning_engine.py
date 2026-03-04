@@ -562,7 +562,7 @@ class ReasoningEngine:
 
         max_no_tool_retries = self._effective_force_retries(base_force_retries, conversation_id)
         max_verify_retries = 3
-        max_confirmation_text_retries = 1
+        max_confirmation_text_retries = 2
 
         # 追踪变量
         executed_tool_names: list[str] = []
@@ -1481,7 +1481,7 @@ class ReasoningEngine:
 
             max_no_tool_retries = self._effective_force_retries(base_force_retries, conversation_id)
             max_verify_retries = 3
-            max_confirmation_text_retries = 1
+            max_confirmation_text_retries = 2
 
             executed_tool_names: list[str] = []
             delivery_receipts: list[dict] = []
@@ -2972,6 +2972,33 @@ class ReasoningEngine:
                     "input": block.input,
                 })
 
+        # 防御层：如果 provider 层未能从 thinking 内容中提取嵌入的工具调用，
+        # 在此做最后一次检查（MiniMax-M2.5 已知会将 <minimax:tool_call> 嵌入 thinking 块）
+        if not tool_calls and thinking_content:
+            try:
+                from ..llm.converters.tools import has_text_tool_calls, parse_text_tool_calls
+                if has_text_tool_calls(thinking_content):
+                    _, embedded_tool_calls = parse_text_tool_calls(thinking_content)
+                    if embedded_tool_calls:
+                        for tc in embedded_tool_calls:
+                            tool_calls.append({
+                                "id": tc.id,
+                                "name": tc.name,
+                                "input": tc.input,
+                            })
+                            assistant_content.append({
+                                "type": "tool_use",
+                                "id": tc.id,
+                                "name": tc.name,
+                                "input": tc.input,
+                            })
+                        logger.warning(
+                            f"[_parse_decision] Recovered {len(embedded_tool_calls)} tool calls "
+                            f"from thinking content (provider-level extraction missed)"
+                        )
+            except Exception as e:
+                logger.debug(f"[_parse_decision] Thinking tool-call check failed: {e}")
+
         decision_type = DecisionType.TOOL_CALLS if tool_calls else DecisionType.FINAL_ANSWER
 
         return Decision(
@@ -2983,6 +3010,31 @@ class ReasoningEngine:
             stop_reason=getattr(response, "stop_reason", ""),
             assistant_content=assistant_content,
         )
+
+    @staticmethod
+    def _build_fallback_summary(
+        executed_tool_names: list[str],
+        delivery_receipts: list[dict],
+    ) -> str | None:
+        """当 LLM 多次未返回可见文本时，从工具执行记录构建 fallback 摘要。"""
+        parts: list[str] = []
+
+        if delivery_receipts:
+            for r in delivery_receipts:
+                desc = r.get("description") or r.get("summary") or r.get("title") or ""
+                if desc:
+                    parts.append(f"• {desc}")
+            if parts:
+                return "已完成以下操作：\n" + "\n".join(parts)
+
+        if executed_tool_names:
+            unique = list(dict.fromkeys(executed_tool_names))
+            tool_summary = "、".join(unique[:10])
+            if len(unique) > 10:
+                tool_summary += f" 等共 {len(unique)} 项"
+            return f"任务已执行完毕（使用了工具：{tool_summary}），但模型未生成文本总结。如需详情请重新提问。"
+
+        return None
 
     # ==================== 最终答案处理 ====================
 
@@ -3067,16 +3119,30 @@ class ReasoningEngine:
                 # 无可见文本
                 no_confirmation_text_count += 1
                 if no_confirmation_text_count <= max_confirmation_text_retries:
-                    working_messages.append({
-                        "role": "user",
-                        "content": (
+                    if no_confirmation_text_count == 1:
+                        retry_prompt = (
                             "[系统] 你已执行过工具，但你刚才没有输出任何用户可见的文字确认。"
                             "请基于已产生的 tool_result 证据，给出最终答复。"
-                        ),
+                        )
+                    else:
+                        retry_prompt = (
+                            "[系统] 警告：你已连续多次未输出可见文字。"
+                            "请立即用一两句话简要总结你完成了什么，不要调用任何工具，不要输出思考过程。"
+                        )
+                    working_messages.append({
+                        "role": "user",
+                        "content": retry_prompt,
                     })
                     return (working_messages, no_tool_call_count, verify_incomplete_count,
                             no_confirmation_text_count, max_no_tool_retries)
 
+                # 所有重试用尽，尝试从工具执行记录构建 fallback 摘要
+                fallback = self._build_fallback_summary(executed_tool_names, delivery_receipts)
+                if fallback:
+                    logger.warning(
+                        "[ForceToolCall] LLM returned empty confirmation; using fallback summary from tool history"
+                    )
+                    return fallback
                 return (
                     "⚠️ 大模型返回异常：工具已执行，但多次未返回任何可见文本确认，任务已中断。"
                     "请重试、或切换到更稳定的端点/模型后再继续。"

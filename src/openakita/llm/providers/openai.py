@@ -599,25 +599,34 @@ class OpenAIProvider(LLMProvider):
 
         # 文本格式工具调用解析（降级方案）
         # 当模型不支持原生工具调用时，解析文本中的 <function_calls> 格式
-        if not has_tool_calls and text_content and has_text_tool_calls(text_content):
+        # 同时检查 reasoning_content 中是否嵌入了工具调用
+        combined_for_check = text_content
+        reasoning_content = message.get("reasoning_content") or ""
+        if not has_tool_calls and not text_content and reasoning_content:
+            if has_text_tool_calls(reasoning_content):
+                combined_for_check = reasoning_content
+                logger.info(
+                    f"[TEXT_TOOL_PARSE] Detected tool calls embedded in reasoning_content from {self.name}"
+                )
+
+        if not has_tool_calls and combined_for_check and has_text_tool_calls(combined_for_check):
             logger.info(f"[TEXT_TOOL_PARSE] Detected text-based tool calls from {self.name}")
-            clean_text, text_tool_calls = parse_text_tool_calls(text_content)
+            clean_text, text_tool_calls = parse_text_tool_calls(combined_for_check)
 
             if text_tool_calls:
-                # 更新文本内容（移除工具调用部分）
-                text_content = clean_text
+                # 更新文本内容（仅在工具调用来自 text_content 时修改）
+                if combined_for_check == text_content:
+                    text_content = clean_text
                 content_blocks.extend(text_tool_calls)
                 has_tool_calls = True
                 logger.info(
-                    f"[TEXT_TOOL_PARSE] Extracted {len(text_tool_calls)} tool calls from text"
+                    f"[TEXT_TOOL_PARSE] Extracted {len(text_tool_calls)} tool calls "
+                    f"from {'reasoning_content' if combined_for_check != text_content else 'text'}"
                 )
 
         # 添加文本内容
         if text_content:
             content_blocks.insert(0, TextBlock(text=text_content))
-
-        # 保存思考内容（Kimi/DashScope 等模型返回）
-        reasoning_content = message.get("reasoning_content")
 
         # 解析停止原因
         finish_reason = choice.get("finish_reason", "stop")
