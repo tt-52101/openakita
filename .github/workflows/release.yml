@@ -611,6 +611,8 @@ jobs:
                     sleep 3
                   done
                   rm -f "${DMG_BG:-}" 2>/dev/null || true
+                  # Clean up temp DMGs left by killed create-dmg (rw.<pid>.<name>.dmg)
+                  find "$(dirname "${dmg_file}")" -maxdepth 1 -name "rw.*.dmg" -delete 2>/dev/null || true
 
                   # Fallback to basic hdiutil if create-dmg failed
                   if [ "${dmg_created}" != "true" ]; then
