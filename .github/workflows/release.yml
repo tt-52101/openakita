@@ -600,7 +600,8 @@ jobs:
                     ( sleep 300 && kill "$CREATE_DMG_PID" 2>/dev/null && echo "create-dmg timed out after 300s" ) &
                     TIMER_PID=$!
                     wait "$CREATE_DMG_PID" 2>/dev/null || true
-                    kill "$TIMER_PID" 2>/dev/null; wait "$TIMER_PID" 2>/dev/null || true
+                    kill "$TIMER_PID" 2>/dev/null || true
+                    wait "$TIMER_PID" 2>/dev/null || true
                     if [ -f "${dmg_file}" ]; then
                       echo "DMG created with custom layout: ${dmg_file}"
                       dmg_created=true
