@@ -128,10 +128,41 @@ def create_app(
     """Create the FastAPI application with all routes mounted."""
 
     from openakita import get_version_string
+
+    tags_metadata = [
+        {"name": "认证", "description": "登录、登出、Token 刷新"},
+        {"name": "对话", "description": "聊天交互、消息控制"},
+        {"name": "智能体", "description": "Agent 配置文件、Bot 管理、协作拓扑"},
+        {"name": "模型", "description": "可用模型/端点列表"},
+        {"name": "配置", "description": "工作区配置、环境变量、端点管理"},
+        {"name": "技能", "description": "技能市场、安装、配置"},
+        {"name": "MCP", "description": "MCP 服务器连接与工具管理"},
+        {"name": "记忆", "description": "长期记忆 CRUD 与向量检索"},
+        {"name": "会话", "description": "会话历史管理"},
+        {"name": "文件", "description": "文件浏览与上传"},
+        {"name": "身份", "description": "AI 身份定义文件管理"},
+        {"name": "定时任务", "description": "计划任务调度"},
+        {"name": "即时通讯", "description": "IM 渠道与消息"},
+        {"name": "Hub", "description": "Agent/Skill 导入导出与市场"},
+        {"name": "工作区", "description": "备份、导入导出"},
+        {"name": "健康检查", "description": "服务健康、诊断、调试"},
+        {"name": "统计", "description": "Token 用量统计"},
+        {"name": "日志", "description": "服务日志查询"},
+        {"name": "反馈", "description": "Bug 报告与功能建议"},
+        {"name": "WebSocket", "description": "实时事件推送"},
+        {"name": "系统", "description": "根路径、关机等系统操作"},
+    ]
+
     app = FastAPI(
         title="OpenAkita API",
-        description="OpenAkita HTTP API for Chat, Health, Skills",
+        description=(
+            "OpenAkita 智能体平台 HTTP API\n\n"
+            "提供对话、Agent 管理、技能配置、MCP 工具、定时任务等完整接口。\n\n"
+            "- Swagger UI: `/docs`\n"
+            "- ReDoc: `/redoc`"
+        ),
         version=get_version_string(),
+        openapi_tags=tags_metadata,
     )
 
     @app.exception_handler(RequestValidationError)
@@ -188,29 +219,29 @@ def create_app(
     app.state.agent_pool = agent_pool
 
     # Mount routes
-    app.include_router(auth_routes.router)
-    app.include_router(agents.router)
-    app.include_router(bug_report.router)
-    app.include_router(chat.router)
-    app.include_router(chat_models.router)
-    app.include_router(config.router)
-    app.include_router(files.router)
-    app.include_router(health.router)
-    app.include_router(im.router)
-    app.include_router(logs.router)
-    app.include_router(mcp.router)
-    app.include_router(memory.router)
-    app.include_router(scheduler.router)
-    app.include_router(sessions.router)
-    app.include_router(skills.router)
-    app.include_router(token_stats.router)
-    app.include_router(upload.router)
-    app.include_router(workspace_io.router)
-    app.include_router(ws_routes.router)
-    app.include_router(hub.router)
-    app.include_router(identity.router)
+    app.include_router(auth_routes.router, tags=["认证"])
+    app.include_router(agents.router, tags=["智能体"])
+    app.include_router(bug_report.router, tags=["反馈"])
+    app.include_router(chat.router, tags=["对话"])
+    app.include_router(chat_models.router, tags=["模型"])
+    app.include_router(config.router, tags=["配置"])
+    app.include_router(files.router, tags=["文件"])
+    app.include_router(health.router, tags=["健康检查"])
+    app.include_router(im.router, tags=["即时通讯"])
+    app.include_router(logs.router, tags=["日志"])
+    app.include_router(mcp.router, tags=["MCP"])
+    app.include_router(memory.router, tags=["记忆"])
+    app.include_router(scheduler.router, tags=["定时任务"])
+    app.include_router(sessions.router, tags=["会话"])
+    app.include_router(skills.router, tags=["技能"])
+    app.include_router(token_stats.router, tags=["统计"])
+    app.include_router(upload.router, tags=["文件"])
+    app.include_router(workspace_io.router, tags=["工作区"])
+    app.include_router(ws_routes.router, tags=["WebSocket"])
+    app.include_router(hub.router, tags=["Hub"])
+    app.include_router(identity.router, tags=["身份"])
 
-    @app.get("/")
+    @app.get("/", tags=["系统"])
     async def root():
         # If web frontend is available, redirect to it
         web_dist = _find_web_dist()
@@ -226,7 +257,7 @@ def create_app(
     # ── Serve web frontend static files ──
     _mount_web_frontend(app)
 
-    @app.post("/api/shutdown")
+    @app.post("/api/shutdown", tags=["系统"])
     async def shutdown(request: Request):
         """Gracefully shut down the OpenAkita service process.
 
