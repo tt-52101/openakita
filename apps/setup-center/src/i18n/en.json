@@ -184,7 +184,7 @@
     "restart": "Restart",
     "restarting": "Restarting...",
     "unresponsive": "Backend Unresponsive",
-    "degradedHint": "Backend process is alive but HTTP is unreachable. It may be busy processing. Wait or restart manually.",
+    "degradedHint": "Backend process is alive but HTTP is unreachable. If you are running a proxy/VPN, try disabling it or adding 127.0.0.1 to the exclusion list. Otherwise wait or restart manually.",
     "degradedAutoClean": "If the process heartbeat stays stale for ~60s, the system will automatically clean up the hung process.",
     "backendNotRunning": "Backend Service Not Running",
     "backendNotRunningHint": "Chat, IM channels, skills and other features require the backend service. Click the button to start it.",
