@@ -31,6 +31,7 @@ export type SidebarProps = {
   onBugReport: () => void;
   onRefreshStatus: () => Promise<void>;
   isWeb?: boolean;
+  mobileOpen?: boolean;
 };
 
 const stepIcons: Partial<Record<StepId, React.ReactNode>> = {
@@ -54,12 +55,12 @@ export function Sidebar({
   disabledViews, multiAgentEnabled, onToggleMultiAgent,
   storeVisible,
   desktopVersion, backendVersion, serviceRunning,
-  onBugReport, onRefreshStatus, isWeb,
+  onBugReport, onRefreshStatus, isWeb, mobileOpen,
 }: SidebarProps) {
   const { t } = useTranslation();
 
   return (
-    <aside className={`sidebar ${collapsed ? "sidebarCollapsed" : ""}`}>
+    <aside className={`sidebar ${collapsed ? "sidebarCollapsed" : ""}${mobileOpen ? " sidebarOpen" : ""}`}>
       <div className="sidebarHeader">
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <img

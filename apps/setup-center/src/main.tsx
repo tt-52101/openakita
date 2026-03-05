@@ -256,6 +256,12 @@ document.addEventListener("click", (e) => {
   });
 });
 
+if ("serviceWorker" in navigator && __BUILD_TARGET__ === "web") {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/web/sw.js").catch(() => {});
+  });
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <GlobalErrorBoundary>

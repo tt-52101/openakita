@@ -3747,44 +3747,163 @@ button:disabled {
 }
 
 /* ──────────────────────────────────────────────────
-   Mobile responsive layout (Web mode)
+   Utility classes
+   ────────────────────────────────────────────────── */
+
+.mobileOnly { display: none !important; }
+
+/* ──────────────────────────────────────────────────
+   Mobile sidebar overlay
+   ────────────────────────────────────────────────── */
+
+.sidebarOverlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(0,0,0,0.45);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ──────────────────────────────────────────────────
+   Mobile responsive layout (Web mode)  <= 768px
    ────────────────────────────────────────────────── */
 
 @media (max-width: 768px) {
-  .appShell {
+  /* layout: single column, no gap, full viewport */
+  .appShell,
+  .appShellCollapsed,
+  .appShellMobile {
     grid-template-columns: 1fr !important;
+    gap: 0 !important;
+    padding: 0 !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    overflow: hidden !important;
   }
 
+  /* sidebar: off-screen drawer */
   .sidebar {
     position: fixed;
     z-index: 1000;
-    inset: 0;
-    width: 100% !important;
-    max-width: 280px;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px !important;
+    max-width: 85vw;
     transform: translateX(-100%);
-    transition: transform 0.2s ease;
-    box-shadow: 4px 0 20px rgba(0,0,0,0.3);
+    transition: transform 0.25s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: 4px 0 24px rgba(0,0,0,0.35);
+    border-radius: 0 !important;
+    border: none !important;
   }
   .sidebar.sidebarOpen {
     transform: translateX(0);
   }
 
-  .contentMain,
+  /* overlay visible when sidebar open */
+  .sidebarOverlay { display: block; }
+
+  /* main panel: full width, full height, no border radius on mobile */
+  .main {
+    border-radius: 0 !important;
+    border: none !important;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* content areas: tighter padding, scroll within fixed height */
+  .content {
+    padding: 6px !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
   .contentChat {
-    width: 100vw !important;
-    padding: 8px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
   }
 
+  /* topbar: compact, sticky, with safe area */
   .topbar {
-    padding: 6px 10px !important;
-    gap: 6px !important;
+    position: sticky !important;
+    top: 0;
+    z-index: 10;
+    padding: 6px 8px !important;
+    padding-top: max(6px, env(safe-area-inset-top)) !important;
+    gap: 4px !important;
+    background: var(--panel) !important;
+    flex-shrink: 0 !important;
+  }
+  .topbarStatusRow {
+    gap: 4px !important;
+    font-size: 11px !important;
+  }
+  .topbarWs { font-size: 12px !important; }
+  .topbarEpCount { display: none !important; }
+
+  /* hamburger button */
+  .mobileOnly { display: flex !important; }
+  .topbarHamburger {
+    background: none;
+    border: none;
+    color: var(--fg);
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .topbarHamburger:active { background: rgba(128,128,128,0.15); }
+
+  /* chat input: larger touch target, prevent iOS zoom */
+  .chatInput { padding: 8px !important; }
+  .chatInputBox textarea { font-size: 16px !important; }
+  .chatInputBox { border-radius: 12px !important; }
+
+  /* chat top bar: compact */
+  .chatTopBar { padding: 6px 8px !important; gap: 4px !important; }
+  .chatTopBarBtn { padding: 6px !important; }
+  .chatTopBarBtn span,
+  .modeToggleBtn span { display: none !important; }
+
+  /* chat input area flush to bottom */
+  .chatInputArea { padding: 6px 8px !important; padding-bottom: max(6px, env(safe-area-inset-bottom)) !important; }
+
+  /* conversation sidebar (right panel in ChatView): overlay drawer */
+  .convSidebar {
+    position: fixed !important;
+    z-index: 1001;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 280px !important;
+    min-width: 0 !important;
+    max-width: 85vw;
+    box-shadow: -4px 0 24px rgba(0,0,0,0.35);
+    transform: translateX(100%);
+    transition: transform 0.25s cubic-bezier(0.4,0,0.2,1);
+  }
+  .convSidebar.convSidebarMobileOpen {
+    transform: translateX(0);
   }
 
-  .chatInput {
-    padding: 8px !important;
+  /* IM view: stack vertically */
+  .imView {
+    grid-template-columns: 1fr !important;
+  }
+  .imLeft {
+    max-height: 35vh;
+    border-right: none !important;
+    border-bottom: 1px solid var(--line);
   }
 
-  .chatInputBox textarea {
-    font-size: 16px !important;
-  }
+  /* cards and dialogs: full width */
+  .card { border-radius: 8px !important; }
+  .modalContent { width: 95vw !important; max-width: 95vw !important; margin: 8px !important; }
+
+  /* hide elements that don't work well on small screens */
+  .topbarConnectBtn span { display: none !important; }
+  .pill { display: none !important; }
 }

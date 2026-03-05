@@ -165,6 +165,16 @@ export function App() {
     }
   }, []);
 
+  useEffect(() => {
+    const onResize = () => {
+      const mobile = window.innerWidth <= 768;
+      setIsMobile(mobile);
+      if (!mobile) setMobileSidebarOpen(false);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const steps: Step[] = useMemo(
     () => [
       { id: "llm" as StepId, title: t("config.step.endpoints"), desc: t("config.step.endpointsDesc") },
@@ -181,6 +191,8 @@ export function App() {
   const [appInitializing, setAppInitializing] = useState(!IS_WEB); // Web 模式无需首次运行检测
   const [configExpanded, setConfigExpanded] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth <= 768);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [bugReportOpen, setBugReportOpen] = useState(false);
   const [disabledViews, setDisabledViews] = useState<string[]>([]);
   const [multiAgentEnabled, setMultiAgentEnabled] = useState(false);
@@ -7515,12 +7527,16 @@ export function App() {
 
   return (
     <EnvFieldContext.Provider value={envFieldCtx}>
-    <div className={`appShell ${sidebarCollapsed ? "appShellCollapsed" : ""}`}>
+    <div className={`appShell ${sidebarCollapsed ? "appShellCollapsed" : ""}${isMobile ? " appShellMobile" : ""}`}>
+      {isMobile && mobileSidebarOpen && (
+        <div className="sidebarOverlay" onClick={() => setMobileSidebarOpen(false)} />
+      )}
       <Sidebar
-        collapsed={sidebarCollapsed}
-        onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
+        collapsed={isMobile ? false : sidebarCollapsed}
+        onToggleCollapsed={() => { if (!isMobile) setSidebarCollapsed((v) => !v); }}
         view={view}
-        onViewChange={setView}
+        onViewChange={(v) => { setView(v); setMobileSidebarOpen(false); }}
+        mobileOpen={mobileSidebarOpen}
         configExpanded={configExpanded}
         onToggleConfig={() => {
           if (sidebarCollapsed) { setView("wizard"); setConfigExpanded(true); }
@@ -7595,6 +7611,7 @@ export function App() {
             setWebAuthed(false);
           } : undefined}
           webAccessUrl={IS_TAURI && (serviceStatus?.running ?? false) ? `http://127.0.0.1:18900/web` : undefined}
+          onToggleMobileSidebar={isMobile ? () => setMobileSidebarOpen((v) => !v) : undefined}
         />
 
         {showPwBanner && (

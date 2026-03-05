@@ -1692,7 +1692,7 @@ export function ChatView({
   const [selectedEndpoint, setSelectedEndpoint] = useState("auto");
   const [planMode, setPlanMode] = useState(false);
   const [streamingTick, setStreamingTick] = useState(0);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== "undefined" && window.innerWidth > 768);
   const [convSearchQuery, setConvSearchQuery] = useState("");
   const [orbitTip, setOrbitTip] = useState<{ x: number; y: number; name: string; title: string } | null>(null);
   const [slashOpen, setSlashOpen] = useState(false);
@@ -4235,7 +4235,11 @@ export function ChatView({
 
       {/* Cursor-style right sidebar — conversations */}
       {sidebarOpen && (
-        <div className="convSidebar">
+        <>
+        {typeof window !== "undefined" && window.innerWidth <= 768 && (
+          <div className="sidebarOverlay" style={{ zIndex: 1000 }} onClick={() => setSidebarOpen(false)} />
+        )}
+        <div className={`convSidebar${typeof window !== "undefined" && window.innerWidth <= 768 ? " convSidebarMobileOpen" : ""}`}>
           <div className="convSidebarHeader">
             <div className="convSearchBox">
               <IconSearch size={13} style={{ opacity: 0.4, flexShrink: 0 }} />
@@ -4278,6 +4282,7 @@ export function ChatView({
             )}
           </div>
         </div>
+        </>
       )}
 
       {/* Orbit tooltip — portal to body to escape overflow:hidden */}
