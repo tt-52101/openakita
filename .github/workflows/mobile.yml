@@ -131,6 +131,10 @@ jobs:
       - name: Sync Capacitor iOS
         run: npx cap sync ios
 
+      - name: Install CocoaPods dependencies
+        working-directory: apps/setup-center/ios/App
+        run: pod install
+
       - name: Check iOS signing secrets
         id: ios_signing
         env:
