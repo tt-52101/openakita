@@ -3,11 +3,7 @@
 OpenAkita PyInstaller spec file
 
 Usage:
-  Core package: pyinstaller build/openakita.spec  (excludes heavy dependencies by default)
-  Full package: OPENAKITA_BUILD_MODE=full pyinstaller build/openakita.spec
-
-Environment variables:
-  OPENAKITA_BUILD_MODE: "core" (default) or "full"
+  pyinstaller build/openakita.spec
 """
 
 import os
@@ -21,14 +17,10 @@ PROJECT_ROOT = Path(SPECPATH).parent
 SRC_DIR = PROJECT_ROOT / "src"
 
 # Force clean output directories to avoid macOS symlink conflicts
-# This must happen early, before PyInstaller starts collecting files
 _dist_server = PROJECT_ROOT / "dist" / "openakita-server"
 if _dist_server.exists():
     print(f"[spec] Removing existing output: {_dist_server}")
     shutil.rmtree(_dist_server)
-
-# Build mode
-BUILD_MODE = os.environ.get("OPENAKITA_BUILD_MODE", "core")
 
 # ============== Hidden Imports ==============
 # Dynamic imports that PyInstaller static analysis may miss
@@ -214,20 +206,7 @@ hidden_imports_core = [
     "pypdf",                    # pypdf: PDF fallback (~2MB)
     # -- Image processing --
     "PIL",                      # Pillow: image format conversion (~10MB)
-    # -- Desktop automation (Windows) --
-    "pyautogui",                # Mouse/keyboard control (~2MB)
-    "pyscreeze",                # pyautogui 依赖: 截图功能
-    "pytweening",               # pyautogui 依赖: 动画插值
-    "pywinauto",                # Windows UI Automation (~5MB)
-    "pywinauto.controls",
-    "pywinauto.controls.uiawrapper",
-    "pywinauto.findwindows",    # 窗口查找 (client.py 直接导入)
-    "pywinauto.timings",        # 超时控制 (client.py 直接导入)
-    "pywinauto.uia_element_info",  # UIA 元素信息 (inspector.py 直接导入)
-    "pywinauto.backend",        # 后端选择 (动态加载 uia/win32 后端)
-    "comtypes",                 # pywinauto 依赖: COM 类型支持 (Windows)
-    "comtypes.client",          # pywinauto 依赖: COM 客户端
-    "comtypes.gen",             # COM 类型存根 (运行时生成，inspector.py 使用)
+    # -- Desktop automation (cross-platform parts) --
     "mss",                      # Screenshot capture (~1MB)
     "mss.tools",
     # -- IM channel adapters (small, bundled to avoid install-on-config bugs) --
@@ -309,7 +288,6 @@ hidden_imports_core = [
     "langchain_core.tools",
     "langsmith",                # LangChain 依赖
     "langsmith.run_helpers",
-    "pydantic_settings",        # browser-use 依赖 (已在上面声明)
     # -- browser-use 运行时传递依赖 --
     "pyee",                     # playwright 依赖: EventEmitter
     "greenlet",                 # playwright 依赖: 协程桥接
@@ -335,22 +313,28 @@ hidden_imports_core = [
     "distro",                   # posthog 依赖: Linux 发行版检测
 ]
 
-hidden_imports_full = [
-    # -- Heavy optional dependencies (full package only) --
-    "sentence_transformers",
-    "chromadb",
-    "torch",
-    # playwright/browser_use/langchain_openai 已移至 core
-    "zmq",
-    "whisper",
-]
+# ============== Platform-specific hidden imports ==============
+if sys.platform == "win32":
+    hidden_imports_core += [
+        "pyautogui",
+        "pyscreeze",
+        "pytweening",
+        "pywinauto",
+        "pywinauto.controls",
+        "pywinauto.controls.uiawrapper",
+        "pywinauto.findwindows",
+        "pywinauto.timings",
+        "pywinauto.uia_element_info",
+        "pywinauto.backend",
+        "comtypes",
+        "comtypes.client",
+        "comtypes.gen",
+    ]
 
 # ============== Auto-collect Python stdlib ==============
-# 外部可选模块（whisper/torch/chromadb 等）通过 sys.path.append 在运行时加载，
-# 它们可能 import 任何标准库模块。PyInstaller 默认只打包主程序引用到的标准库，
-# 导致外部模块运行时出现 "No module named 'xxx'" 错误（已多次出现 timeit/lzma 等）。
-# 解决方案：自动收集 Python 全部标准库模块，一劳永逸消除此类问题。
-# 额外包体积约 5-10MB（相比 torch 500MB+ 微不足道）。
+# PyInstaller 默认只打包主程序引用到的标准库，但运行时可能需要其他标准库模块
+# （如 timeit/lzma 等）。自动收集全部标准库模块，一劳永逸消除此类问题。
+# 额外包体积约 5-10MB。
 
 def _collect_stdlib_modules():
     """收集 Python 全部标准库顶层模块名（纯 Python + C 扩展）"""
@@ -388,47 +372,41 @@ _stdlib_modules = _collect_stdlib_modules()
 print(f"[spec] Auto-collected {len(_stdlib_modules)} stdlib modules")
 
 hidden_imports = hidden_imports_core + _stdlib_modules
-if BUILD_MODE == "full":
-    hidden_imports += hidden_imports_full
 
 # ============== Excludes ==============
-# Heavy dependencies excluded from core package
 
 excludes_core = [
+    # 已从项目中移除的重型模块（防止被间接拉入）
     "sentence_transformers",
     "chromadb",
     "torch",
     "torchvision",
     "torchaudio",
-    # playwright/browser_use/langchain_openai 已移至 core 打包，不再排除
     "zmq",
     "pyzmq",
     "whisper",
-    # browser-use 的 provider SDK (lazy import，我们只用 langchain_openai，其他排除)
-    "google_genai",         # Google GenAI (~50MB) — browser-use 可选
+    # browser-use 的 provider SDK (lazy import，只用 langchain_openai，其他排除)
+    "google_genai",
     "google.genai",
-    "google.api_core",      # Google API Core
-    "google.auth",          # Google Auth
+    "google.api_core",
+    "google.auth",
     "google_auth_oauthlib",
     "google_api_core",
     "google_api_python_client",
     "googleapiclient",
-    "groq",                 # Groq SDK — browser-use 可选
-    "ollama",               # Ollama SDK — browser-use 可选
-    "reportlab",            # PDF 生成 (~20MB) — browser-use 可选
-    "authlib",              # OAuth 库 — browser-use 可选
-    "inquirerpy",           # CLI 交互 — browser-use 可选
-    "langchain",            # LangChain 全量框架 (~50MB)，只需 langchain_core
-    # Heavy packages not needed for core (often pulled in from global site-packages)
-    "cv2",                  # OpenCV (~122MB) — not a core dependency
+    "groq",
+    "ollama",
+    "reportlab",
+    "authlib",
+    "inquirerpy",
+    "langchain",
+    # Heavy packages not needed (often pulled in from global site-packages)
+    "cv2",
     "opencv_python",
-    # NOTE: numpy and PIL removed from excludes — many optional modules
-    # (e.g. Pillow, mss, pyautogui) depend on them indirectly; excluding
-    # causes silent cascading ImportErrors at runtime.
     "matplotlib",
     "scipy",
     "pandas",
-    "psycopg2",             # PostgreSQL driver — not a core dependency
+    "psycopg2",
     "psycopg2_binary",
     # GUI toolkits (not needed for headless server)
     "tkinter",
@@ -437,14 +415,14 @@ excludes_core = [
     "PySide2",
     "PySide6",
     "wx",
-    # Test frameworks (不排除 unittest — 属于标准库，torch 等外部模块可能依赖)
-    "test",                 # CPython 内部测试套件
+    # Test frameworks
+    "test",
     "tests",
     "pytest",
     "_pytest",
 ]
 
-excludes = excludes_core if BUILD_MODE == "core" else []
+excludes = excludes_core
 
 # ============== Data Files ==============
 # Non-Python files to be bundled
@@ -564,7 +542,6 @@ except ImportError:
 # Built-in Python interpreter + pip (bundled mode can install optional modules without host Python)
 # IMPORTANT: do NOT bundle a venv launcher (it may require pyvenv.cfg at runtime).
 # Prefer base interpreter from sys.base_prefix, fallback to sys.executable.
-import shutil
 _sys_python_exe = Path(sys.executable)
 _base_prefix = Path(getattr(sys, "base_prefix", "")) if getattr(sys, "base_prefix", "") else None
 if _base_prefix:

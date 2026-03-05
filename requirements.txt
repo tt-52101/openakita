@@ -1,7 +1,9 @@
 # =====================================================
-# OpenAkita - 完整依赖列表
+# OpenAkita - 依赖列表
 # Python 版本要求: >= 3.11
-# 生成时间: 2026-01-31
+#
+# 权威来源: pyproject.toml
+# 本文件供 pip install -r 快速安装，与 pyproject.toml 保持一致。
 # =====================================================
 
 # === 核心 LLM 依赖 ===
@@ -12,7 +14,7 @@ openai>=1.0.0              # OpenAI 兼容 API (备用端点支持)
 mcp>=1.0.0                 # MCP 协议支持
 
 # === Web Search ===
-ddgs>=8.0.0                # DuckDuckGo 搜索 (无需 API Key)
+ddgs>=8.0.0                # 多引擎聚合搜索 (无需 API Key)
 
 # === CLI 和用户界面 ===
 rich>=13.7.0               # 终端富文本输出
@@ -22,7 +24,7 @@ typer>=0.12.0              # CLI 框架
 # === 异步和 HTTP ===
 httpx[socks]>=0.27.0       # 异步 HTTP 客户端 (含 SOCKS 代理支持)
 aiofiles>=24.1.0           # 异步文件操作
-nest-asyncio>=1.5.0        # 嵌套事件循环支持（解决第三方库冲突）
+nest-asyncio>=1.5.0        # 嵌套事件循环支持
 
 # === 数据库 ===
 aiosqlite>=0.20.0          # 异步 SQLite
@@ -35,9 +37,9 @@ pydantic-settings>=2.1.0   # 配置管理
 gitpython>=3.1.40          # Git 操作库
 
 # === 浏览器自动化 ===
-browser-use>=0.11.8        # AI 浏览器代理 (https://github.com/browser-use/browser-use)
-langchain-openai>=1.0.0    # LangChain OpenAI 接口 (browser-use LLM 继承)
-playwright>=1.40.0         # 浏览器自动化 (browser-use 依赖)
+browser-use>=0.11.8        # AI 浏览器代理
+langchain-openai>=1.0.0    # LangChain OpenAI 接口 (browser-use 依赖)
+playwright>=1.40.0         # 浏览器自动化引擎
 
 # === 配置文件 ===
 pyyaml>=6.0.1              # YAML 解析
@@ -45,61 +47,56 @@ python-dotenv>=1.0.0       # 环境变量加载
 
 # === 工具库 ===
 tenacity>=8.2.3            # 重试机制
+simplejson>=3.19.2         # JSON 序列化
 
-# === 记忆系统 - 向量搜索 ===
-sentence-transformers>=2.2.0  # 本地 embedding 模型
-chromadb>=0.4.0               # 向量数据库 (可选, search_backend=chromadb)
-jieba>=0.42                   # 中文分词 (FTS5 搜索后端)
+# === 图像处理 ===
+Pillow>=10.0.0             # 图片格式转换/处理
 
-# === 语音识别 ===
-openai-whisper>=20231117      # Whisper 语音转文字
+# === HTTP API ===
+fastapi>=0.110.0           # HTTP API 框架
+uvicorn>=0.27.0            # ASGI 服务器
 
-# =====================================================
-# Windows 桌面自动化 (Windows Only)
-# =====================================================
-
-mss>=9.0.0                    # 高性能截图
-pyautogui>=0.9.54             # 鼠标键盘控制
-pywinauto>=0.6.8              # Windows UIAutomation
-pyperclip>=1.8.2              # 剪贴板操作（支持中文输入）
-psutil>=5.9.0                 # 进程信息（获取窗口进程名）
-
-# =====================================================
-# 可选依赖 - IM 通道
-# 根据需要取消注释
-# =====================================================
-
-# Telegram 机器人
+# === IM 通道 - Telegram (默认) ===
 python-telegram-bot>=21.0  # Telegram Bot API
+
+# =====================================================
+# 可选依赖 - IM 通道 (pip install openakita[all] 全装)
+# 按需取消注释，或使用 pip install openakita[feishu] 等
+# =====================================================
 
 # 飞书
 lark-oapi>=1.2.0           # 飞书官方 SDK (WebSocket 长连接)
-# 企业微信 (需要 aiohttp 回调服务器 + pycryptodome 消息加解密)
-aiohttp>=3.9.0            # 企业微信 HTTP 回调服务器
-pycryptodome>=3.19.0      # 企业微信消息加解密 (AES-256-CBC)
 
-# 钉钉 (Stream 模式，WebSocket 长连接)
-dingtalk-stream>=0.24.0   # 钉钉 Stream SDK
+# 企业微信
+aiohttp>=3.9.0             # 企业微信 HTTP 回调服务器
+pycryptodome>=3.19.0       # 企业微信消息加解密 (AES-256-CBC)
+
+# 钉钉 (Stream 模式)
+dingtalk-stream>=0.24.0    # 钉钉 Stream SDK
 
 # OneBot 协议 (NapCat/Lagrange 等)
-websockets>=15.0.1          # OneBot WebSocket 支持
+websockets>=15.0.1         # OneBot WebSocket 支持
 
 # QQ 官方机器人
-qq-botpy>=1.1.5           # QQ 开放平台官方 Bot SDK
-pilk>=0.2.1               # SILK 语音编解码（QQ/微信语音格式）
+qq-botpy>=1.1.5            # QQ 开放平台官方 Bot SDK
+pilk>=0.2.1                # SILK 语音编解码（QQ 语音格式）
 
-# === ffmpeg 自动安装 (Whisper 语音转写依赖) ===
-static-ffmpeg>=2.7        # ffmpeg 静态二进制自动下载
+# =====================================================
+# 可选依赖 - Windows 桌面自动化
+# =====================================================
+
+mss>=9.0.0                 # 高性能截图
+pyautogui>=0.9.54          # 鼠标键盘控制
+pywinauto>=0.6.8; platform_system == "Windows"  # Windows UIAutomation
+pyperclip>=1.8.2           # 剪贴板操作
+psutil>=5.9.0              # 进程信息
 
 # =====================================================
 # 开发依赖 (可选)
 # =====================================================
 
-# 测试
 # pytest>=8.0.0
 # pytest-asyncio>=0.23.0
 # pytest-cov>=4.1.0
-
-# 代码质量
 # ruff>=0.1.9
 # mypy>=1.8.0

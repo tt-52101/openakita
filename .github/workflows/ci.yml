@@ -132,7 +132,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.11', '3.12']
+        python-version: ['3.11', '3.12', '3.13']
       fail-fast: false
 
     steps:
@@ -260,9 +260,8 @@ jobs:
         if: ${{ hashFiles('apps/setup-center/src-tauri/Cargo.toml') == '' }}
         run: echo "apps/setup-center/src-tauri not present in repository; skipping."
 
-  # ── Tauri 完整构建检查（仅 Linux，push to main 或 v*.x 稳定分支时执行） ──
+  # ── Tauri 完整构建检查（仅 Linux） ──
   tauri_full_build_check:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/v'))
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -309,7 +308,7 @@ jobs:
           rm -rf build/pyinstaller_work
 
       - name: Package Python backend (PyInstaller)
-        run: python build/build_backend.py --mode core
+        run: python build/build_backend.py
 
       - name: Copy backend to Tauri resources
         run: |

@@ -9,6 +9,9 @@ if (typeof AbortSignal.timeout !== "function") {
   };
 }
 
+import { installLocalFetchOverride } from "./localFetch";
+installLocalFetchOverride();
+
 import React from "react";
 import ReactDOM from "react-dom/client";
 

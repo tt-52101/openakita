@@ -14,8 +14,7 @@
 - [四、企业微信配置教程](#四企业微信配置教程)
 - [五、QQ 官方机器人配置教程](#五qq-官方机器人配置教程)
 - [六、OneBot（通用协议）配置教程](#六onebot通用协议配置教程)
-- [七、语音识别（Whisper）配置](#七语音识别whisper配置)
-- [八、常见问题汇总](#八常见问题汇总)
+- [七、常见问题汇总](#七常见问题汇总)
 
 ---
 
@@ -38,7 +37,7 @@
 |------|----------|------|------|---------|-------------|--------|
 | 文字 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 图片 | ✅ | ✅ | ✅ | ⚠️ 仅单聊 | ✅ | ✅ |
-| 语音 | ✅ (Whisper转写) | ✅ (Whisper转写) | ✅ (Whisper转写) | ❌ 不支持 | ✅ | ✅ (Whisper转写) |
+| 语音 | ✅ | ✅ | ✅ | ❌ 不支持 | ✅ | ✅ |
 | 文件 | ✅ | ✅ | ✅ | ❌ 不支持 | ✅ | ✅ |
 | 视频 | ✅ | ✅ | ✅ | ❌ 不支持 | ✅ | ✅ |
 
@@ -70,10 +69,9 @@ pip install openakita[dingtalk]    # 钉钉
 pip install openakita[wework]      # 企业微信
 pip install openakita[qqbot]       # QQ 官方机器人
 pip install openakita[onebot]      # OneBot（通用协议）
-pip install openakita[whisper]     # 语音识别
 
 # 组合安装
-pip install openakita[feishu,dingtalk,qqbot,whisper]
+pip install openakita[feishu,dingtalk,qqbot]
 ```
 
 ---
@@ -1228,56 +1226,7 @@ ONEBOT_ACCESS_TOKEN=                    # 可选，用于连接鉴权
 
 ---
 
-## 七、语音识别（Whisper）配置
-
-> 所有 IM 通道的语音消息都会经过统一的 Whisper 语音转文字处理。
-
-### 6.1 工作流程
-
-```
-用户发送语音 → IM 适配器接收 → Gateway 下载语音 → Whisper 转写 → 文字传给 Agent
-```
-
-### 6.2 安装 ffmpeg
-
-Whisper 需要 ffmpeg 来解码音频文件。
-
-```bash
-# Windows
-winget install FFmpeg
-
-# macOS
-brew install ffmpeg
-
-# Linux (Ubuntu/Debian)
-sudo apt install ffmpeg
-
-# 或通过 Python 自动安装静态版
-pip install static-ffmpeg
-```
-
-### 6.3 配置
-
-```bash
-# .env
-WHISPER_MODEL=base
-# 语言设置: zh(中文) | en(英文) | auto(自动检测)
-WHISPER_LANGUAGE=zh
-```
-
-### 6.4 模型选择参考
-
-| 模型 | 大小 | 速度 | 精度 | 推荐场景 |
-|------|------|------|------|---------|
-| tiny | ~39MB | 最快 | 一般 | 资源极度有限的设备 |
-| base | ~74MB | 快 | 较好 | **推荐**，性价比最高 |
-| small | ~244MB | 中等 | 好 | 对精度有一定要求 |
-| medium | ~769MB | 慢 | 很好 | 专业场景 |
-| large | ~1.5GB | 最慢 | 最好 | 最高精度要求 |
-
----
-
-## 八、常见问题汇总
+## 七、常见问题汇总
 
 ### Q1：如何同时启用多个 IM 通道？
 
@@ -1386,9 +1335,6 @@ ONEBOT_ENABLED=false
 ONEBOT_WS_URL=ws://127.0.0.1:8080
 ONEBOT_ACCESS_TOKEN=
 
-# --- 语音识别 ---
-WHISPER_MODEL=base
-WHISPER_LANGUAGE=zh
 ```
 
 ---

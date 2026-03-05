@@ -21,7 +21,7 @@ OpenAkita 支持多个即时通讯平台，每个平台通过独立的适配器 
 |------|----------|------|------|---------|-------------|--------|
 | 文字 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 图片 | ✅ | ✅ | ✅ | ⚠️ 仅单聊 | ✅ | ✅ |
-| 语音 | ✅ (Whisper转写) | ✅ (Whisper转写) | ✅ (Whisper转写) | ❌ 不支持 | ✅ | ✅ (Whisper转写) |
+| 语音 | ✅ | ✅ | ✅ | ❌ 不支持 | ✅ | ✅ |
 | 文件 | ✅ | ✅ | ✅ | ❌ 不支持 | ✅ | ✅ |
 | 视频 | ✅ | ✅ | ✅ | ❌ 不支持 | ✅ | ✅ |
 
@@ -36,7 +36,7 @@ OpenAkita 支持多个即时通讯平台，每个平台通过独立的适配器 
 
 > **企业微信限制说明**：智能机器人通过 stream 流式被动回复发送文本和图片（JPG/PNG，≤10MB，单条最多 10 张）。**不支持语音、文件和视频的收发**。接收端仅支持文字、图文混排和图片（图片仅单聊）。response_url 作为 stream 不可用时的降级方案（仅文本）。
 
-> **注意**: 图片和语音由 MessageGateway 自动下载并预处理。语音会自动通过 Whisper 转写为文本。文件和视频不会自动下载，需要通过 `deliver_artifacts` 工具主动处理。
+> **注意**: 图片和语音由 MessageGateway 自动下载并预处理。文件和视频不会自动下载，需要通过 `deliver_artifacts` 工具主动处理。
 
 ---
 
@@ -477,49 +477,6 @@ OneBot v11 的文件发送不支持 CQ 码，必须使用专用 API：
 
 ---
 
-## 语音识别 (Whisper)
-
-所有 IM 通道的语音消息都会经过 MessageGateway 统一预处理：
-
-1. 适配器将语音消息解析为 `UnifiedMessage`（包含 `MediaFile`）
-2. Gateway 自动下载语音文件到本地
-3. Gateway 调用 Whisper 模型进行语音转文字
-4. 转写结果存入 `MediaFile.transcription`，传递给 Agent
-
-### ffmpeg 依赖
-
-Whisper 需要 `ffmpeg` 来解码音频文件。OpenAkita 支持自动检测和安装：
-
-- **已安装 ffmpeg**: 自动检测系统 PATH 中的 ffmpeg
-- **未安装 ffmpeg**: 自动通过 `static-ffmpeg` 包下载静态二进制
-
-```bash
-# 手动安装 ffmpeg（推荐）
-# Windows: winget install FFmpeg
-# macOS: brew install ffmpeg
-# Linux: sudo apt install ffmpeg
-
-# 或通过 Python 自动安装
-pip install static-ffmpeg
-```
-
-### Whisper 模型选择
-
-```bash
-# .env
-WHISPER_MODEL=base  # tiny/base/small/medium/large
-```
-
-| 模型 | 大小 | 速度 | 精度 |
-|------|------|------|------|
-| tiny | ~39MB | 最快 | 一般 |
-| base | ~74MB | 快 | 较好 |
-| small | ~244MB | 中等 | 好 |
-| medium | ~769MB | 慢 | 很好 |
-| large | ~1.5GB | 最慢 | 最好 |
-
----
-
 ## 统一安装
 
 安装所有 IM 通道依赖：
@@ -536,10 +493,9 @@ pip install openakita[dingtalk]    # 钉钉
 pip install openakita[wework]      # 企业微信
 pip install openakita[qqbot]       # QQ 官方机器人
 pip install openakita[onebot]      # OneBot（通用协议）
-pip install openakita[whisper]     # 语音识别（含 ffmpeg）
 
 # 组合安装
-pip install openakita[feishu,dingtalk,qqbot,whisper]
+pip install openakita[feishu,dingtalk,qqbot]
 ```
 
 ---

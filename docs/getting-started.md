@@ -25,9 +25,7 @@ pip install openakita
 
 # Optional features
 pip install "openakita[all]"      # install all optional features
-# pip install "openakita[browser]"  # browser agent
 # pip install "openakita[windows]"  # Windows desktop automation
-# pip install "openakita[whisper]"  # voice recognition
 # pip install "openakita[feishu]"   # Feishu (Lark)
 
 # Run setup wizard

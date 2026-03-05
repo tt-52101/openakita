@@ -18,7 +18,6 @@
   - [IM 通道配置](#im-通道配置)
   - [身份配置 (identity/)](#身份配置-identity)
   - [记忆系统配置](#记忆系统配置)
-  - [多 Agent 协同配置](#多-agent-协同配置)
 - [启动服务](#启动服务)
 - [PyPI 发布](#pypi-发布)
 - [生产部署](#生产部署)
@@ -74,10 +73,8 @@ pip install openakita
 
 # 3. 安装可选功能
 pip install openakita[feishu]     # + 飞书支持
-pip install openakita[whisper]    # + 语音识别
-pip install openakita[browser]    # + 浏览器 AI 代理
 pip install openakita[windows]    # + Windows 桌面自动化
-pip install openakita[all]        # 安装所有可选功能（跨平台安全，Windows-only 依赖会自动跳过）
+pip install openakita[all]       # 安装所有可选功能（跨平台安全，Windows-only 依赖会自动跳过）
 
 # 4. 运行初始化向导
 openakita init
@@ -147,11 +144,10 @@ cd openakita
 3. 创建虚拟环境
 4. 安装项目依赖（失败自动切换国内镜像）
 5. 可选安装 Playwright 浏览器
-6. 可选下载 Whisper 语音模型
-7. 初始化 `.env` 和 `data/llm_endpoints.json`
-8. 创建所有必要数据目录
-9. 验证安装
-10. 可选创建 systemd 服务（Linux）
+6. 初始化 `.env` 和 `data/llm_endpoints.json`
+7. 创建所有必要数据目录
+8. 验证安装
+9. 可选创建 systemd 服务（Linux）
 
 ### 方式三：源码安装
 
@@ -279,8 +275,6 @@ ANTHROPIC_API_KEY=sk-your-api-key-here
 | `EMBEDDING_MODEL` | | `shibing624/text2vec-base-chinese` | Embedding 模型 |
 | `EMBEDDING_DEVICE` | | `cpu` | 计算设备（cpu/cuda） |
 | `MEMORY_HISTORY_DAYS` | | `30` | 历史保留天数 |
-| **语音识别** | | | |
-| `WHISPER_MODEL` | | `base` | Whisper 模型大小 |
 | **GitHub** | | | |
 | `GITHUB_TOKEN` | | - | 用于搜索/下载技能 |
 
@@ -601,29 +595,7 @@ EMBEDDING_DEVICE=cpu                                # 有 GPU 可设为 cuda
 
 **首次启动**会自动下载 Embedding 模型（约 100MB）。
 
-**离线部署**可提前下载：
-```bash
-python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('shibing624/text2vec-base-chinese')"
-```
-
-**GPU 加速**（可选）：
-```bash
-pip install torch --index-url https://download.pytorch.org/whl/cu118
-# .env 中设置 EMBEDDING_DEVICE=cuda
-```
-
-### 多 Agent 协同配置
-
-启用 MasterAgent + Worker 架构处理复杂任务：
-
-```ini
-# .env 中配置
-ORCHESTRATION_ENABLED=true
-ORCHESTRATION_BUS_ADDRESS=tcp://127.0.0.1:5555
-ORCHESTRATION_PUB_ADDRESS=tcp://127.0.0.1:5556
-ORCHESTRATION_MIN_WORKERS=1
-ORCHESTRATION_MAX_WORKERS=5
-```
+**离线部署**可提前下载模型到本地缓存目录。
 
 ---
 

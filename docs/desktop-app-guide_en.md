@@ -319,7 +319,7 @@ The wizard has 9 steps to guide users from zero to running. Completed steps are 
 
 - **MCP services**: Browser-Use and other MCP service configuration
 - **Desktop automation**: Enable/disable
-- **Whisper speech recognition**: Model selection
+- **Speech recognition**: Model selection (requires separate speech recognition dependency)
 - **Network proxy**: HTTP/HTTPS/SOCKS proxy configuration
 - **GitHub Token**: For skill installation, etc.
 - **Installed skill list**: Collapsed display

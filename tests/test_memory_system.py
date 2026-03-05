@@ -27,6 +27,18 @@ from openakita.memory.manager import MemoryManager
 from openakita.memory.consolidator import MemoryConsolidator
 from openakita.memory.daily_consolidator import DailyConsolidator
 
+try:
+    import sentence_transformers  # noqa: F401
+    import chromadb  # noqa: F401
+    _VECTOR_DEPS_AVAILABLE = True
+except ImportError:
+    _VECTOR_DEPS_AVAILABLE = False
+
+_skip_no_vector = pytest.mark.skipif(
+    not _VECTOR_DEPS_AVAILABLE,
+    reason="sentence-transformers and/or chromadb not installed",
+)
+
 
 # ============================================================
 # Fixtures
@@ -90,6 +102,7 @@ def mock_brain():
 # VectorStore 测试 (15 个)
 # ============================================================
 
+@_skip_no_vector
 class TestVectorStore:
     """向量存储测试"""
     
@@ -416,6 +429,7 @@ class TestMemoryExtractor:
 # MemoryManager 测试 (12 个)
 # ============================================================
 
+@_skip_no_vector
 class TestMemoryManager:
     """记忆管理器测试"""
     
@@ -793,6 +807,7 @@ class TestSessionTaskManagement:
 # 集成测试 (5 个)
 # ============================================================
 
+@_skip_no_vector
 class TestIntegration:
     """集成测试"""
     

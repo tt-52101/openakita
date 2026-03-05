@@ -160,43 +160,36 @@ jobs:
           - platform: windows-latest
             bundles: "nsis"
             args: ""
-            build_mode: "core"
-            suffix: "windows-x64-core"
+            suffix: "windows-x64"
           # Linux Ubuntu 22.04
           - platform: ubuntu-22.04
             bundles: "deb"
             args: ""
-            build_mode: "core"
             suffix: "ubuntu22-amd64"
           - platform: ubuntu-22.04-arm
             bundles: "deb"
             args: ""
-            build_mode: "core"
             suffix: "ubuntu22-arm64"
           # Linux Ubuntu 24.04
           - platform: ubuntu-24.04
             bundles: "deb"
             args: ""
-            build_mode: "core"
             suffix: "ubuntu24-amd64"
           - platform: ubuntu-24.04-arm
             bundles: "deb"
             args: ""
-            build_mode: "core"
             suffix: "ubuntu24-arm64"
           # macOS - Apple Silicon (arm64)
           - platform: macos-latest
             bundles: "app,dmg"
             args: "--target aarch64-apple-darwin"
             rust_target: "aarch64-apple-darwin"
-            build_mode: "core"
             suffix: "macos-arm64"
           # macOS - Intel (x86_64)
           - platform: macos-15-intel
             bundles: "app,dmg"
             args: "--target x86_64-apple-darwin"
             rust_target: "x86_64-apple-darwin"
-            build_mode: "core"
             suffix: "macos-x64"
 
     runs-on: ${{ matrix.platform }}
@@ -221,7 +214,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          architecture: ${{ matrix.python_arch || '' }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -248,13 +240,7 @@ jobs:
         run: |
           # Ensure dist-web exists (required by pyproject.toml force-include; actual web build not needed for desktop)
           mkdir -p apps/setup-center/dist-web
-          if [ "${{ matrix.build_mode }}" = "full" ]; then
-            pip install -e ".[all]"
-          else
-            # Core + all IM channels + desktop automation
-            # These are listed in hidden_imports/datas and must be installed for PyInstaller to bundle them
-            pip install -e ".[feishu,dingtalk,wework,onebot,qqbot,windows]"
-          fi
+          pip install -e ".[all]"
           pip install "pyinstaller>=6.18.0"
 
       - name: Clean previous PyInstaller output
@@ -270,24 +256,15 @@ jobs:
           fi
 
       - name: Package Python backend (PyInstaller)
-        run: python build/build_backend.py --mode ${{ matrix.build_mode }}
-
-      - name: Bundle optional modules (full mode only)
-        if: matrix.build_mode == 'full'
-        run: python build/bundle_modules.py
+        run: python build/build_backend.py
 
       - name: Copy backend to Tauri resources
         shell: bash
         run: |
           RESOURCE_DIR="apps/setup-center/src-tauri/resources"
           mkdir -p "$RESOURCE_DIR"
-          # 清除旧的构建产物，防止 cp 冲突
           rm -rf "$RESOURCE_DIR/openakita-server"
           cp -r dist/openakita-server "$RESOURCE_DIR/openakita-server"
-          if [ "${{ matrix.build_mode }}" = "full" ] && [ -d "build/modules" ]; then
-            rm -rf "$RESOURCE_DIR/modules"
-            cp -r build/modules "$RESOURCE_DIR/modules"
-          fi
           echo "Resources copied:"
           du -sh "$RESOURCE_DIR"/*
 
@@ -375,7 +352,7 @@ jobs:
         working-directory: apps/setup-center
         timeout-minutes: 150
         env:
-          TAURI_CONFIG: ${{ matrix.build_mode == 'full' && '{"bundle":{"resources":["resources/openakita-server/","resources/modules/"]}}' || '{}' }}
+          TAURI_CONFIG: '{}'
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -445,6 +422,14 @@ jobs:
           for app in "${APPS[@]}"; do
             FRAMEWORK_DIR="${app}/Contents/Resources/resources/openakita-server/_internal/Python.framework"
             if [ -d "${FRAMEWORK_DIR}" ]; then
+              # Detect the actual Python version bundled by PyInstaller (e.g. 3.11, 3.12, 3.13)
+              PY_FW_VER=$(ls -1 "${FRAMEWORK_DIR}/Versions/" 2>/dev/null | grep -E '^3\.[0-9]+$' | head -1)
+              if [ -z "${PY_FW_VER}" ]; then
+                PY_FW_VER="3.11"
+                echo "WARNING: Could not detect Python version in framework, falling back to ${PY_FW_VER}"
+              fi
+              echo "Detected bundled Python framework version: ${PY_FW_VER}"
+
               # PyInstaller copies files instead of creating symlinks, but macOS
               # framework conventions require top-level Python.framework/Python and
               # Python.framework/Resources to be symlinks into Versions/Current/.
@@ -473,7 +458,7 @@ jobs:
               # 1) Sign executables inside Python.app bundles (deepest level).
               for pybin in \
                 "${FRAMEWORK_DIR}/Resources/Python.app/Contents/MacOS/Python" \
-                "${FRAMEWORK_DIR}/Versions/3.11/Resources/Python.app/Contents/MacOS/Python" \
+                "${FRAMEWORK_DIR}/Versions/${PY_FW_VER}/Resources/Python.app/Contents/MacOS/Python" \
                 "${FRAMEWORK_DIR}/Versions/Current/Resources/Python.app/Contents/MacOS/Python"; do
                 if [ -f "${pybin}" ]; then
                   REAL_PYBIN="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${pybin}")"
@@ -489,7 +474,7 @@ jobs:
               # 2) Sign Python.app bundles (seals the executables from step 1).
               for pyapp in \
                 "${FRAMEWORK_DIR}/Resources/Python.app" \
-                "${FRAMEWORK_DIR}/Versions/3.11/Resources/Python.app" \
+                "${FRAMEWORK_DIR}/Versions/${PY_FW_VER}/Resources/Python.app" \
                 "${FRAMEWORK_DIR}/Versions/Current/Resources/Python.app"; do
                 if [ -d "${pyapp}" ]; then
                   REAL_PYAPP="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${pyapp}")"
@@ -507,7 +492,7 @@ jobs:
               #    Python.framework/Python is now a symlink (fixed above) and needs
               #    no separate signing.
               for fwbin in \
-                "${FRAMEWORK_DIR}/Versions/3.11/Python" \
+                "${FRAMEWORK_DIR}/Versions/${PY_FW_VER}/Python" \
                 "${FRAMEWORK_DIR}/Versions/Current/Python"; do
                 if [ -f "${fwbin}" ]; then
                   REAL_FWBIN="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${fwbin}")"
@@ -866,7 +851,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: signatures-${{ matrix.platform }}-${{ matrix.build_mode }}
+          name: signatures-${{ matrix.suffix }}
           path: apps/setup-center/src-tauri/target/**/bundle/_upload/*.sig
           if-no-files-found: ignore
           retention-days: 5
@@ -922,10 +907,10 @@ jobs:
           if [ -n "${HAS_OSS_KEY}" ]; then
             CDN_ARGS="--cdn-base-url https://${{ secrets.ALIYUN_OSS_CDN_DOMAIN }}"
             if [ -n "${HAS_R2_KEY}" ]; then
-              CDN_ARGS="${CDN_ARGS} --cdn-fallback-url https://dl.openakita.ai"
+              CDN_ARGS="${CDN_ARGS} --cdn-fallback-url https://dl-openakita.fzstack.com"
             fi
           elif [ -n "${HAS_R2_KEY}" ]; then
-            CDN_ARGS="--cdn-base-url https://dl.openakita.ai"
+            CDN_ARGS="--cdn-base-url https://dl-openakita.fzstack.com"
           fi
           python scripts/generate_latest_json.py \
             --tag "${{ env.RELEASE_TAG }}" \

@@ -879,6 +879,7 @@ fn graceful_stop_pid(pid: u32, port: Option<u16>) -> Result<(), String> {
     // 第一步：尝试通过 HTTP API 触发优雅关闭
     let api_ok = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
+        .no_proxy()
         .build()
         .ok()
         .and_then(|client| {
@@ -1168,12 +1169,28 @@ fn kill_pid(pid: u32) -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
+        let pid_str = pid.to_string();
+
+        // SIGTERM: 允许进程优雅退出
+        let _ = Command::new("kill")
+            .args(["-TERM", &pid_str])
+            .status();
+
+        // 等待最多 2 秒确认退出
+        for _ in 0..10 {
+            if !is_pid_running(pid) {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+
+        // SIGKILL: 进程未响应 SIGTERM（可能事件循环卡死），强制终止
         let status = Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
+            .args(["-KILL", &pid_str])
             .status()
-            .map_err(|e| format!("kill failed: {e}"))?;
-        if !status.success() {
-            return Err(format!("kill failed: {status}"));
+            .map_err(|e| format!("kill -KILL failed: {e}"))?;
+        if !status.success() && is_pid_running(pid) {
+            return Err(format!("kill -KILL failed: {status}"));
         }
         Ok(())
     }
@@ -1356,6 +1373,7 @@ fn kill_openakita_orphans() -> Vec<u32> {
             "ps aux | grep '[o]penakita\\.main.*serve' | awk '{print $2}'",
             "ps aux | grep '[o]penakita-server' | awk '{print $2}'",
         ];
+        let mut pids_to_kill: Vec<u32> = Vec::new();
         for pattern in &patterns {
             if let Ok(out) = Command::new("sh")
                 .args(["-c", pattern])
@@ -1364,15 +1382,33 @@ fn kill_openakita_orphans() -> Vec<u32> {
                 let stdout = String::from_utf8_lossy(&out.stdout);
                 for line in stdout.lines() {
                     if let Ok(pid) = line.trim().parse::<u32>() {
-                        if is_pid_running(pid) && !killed.contains(&pid) {
-                            let _ = Command::new("kill")
-                                .args(["-TERM", &pid.to_string()])
-                                .status();
-                            killed.push(pid);
+                        if is_pid_running(pid) && !killed.contains(&pid) && !pids_to_kill.contains(&pid) {
+                            pids_to_kill.push(pid);
                         }
                     }
                 }
             }
+        }
+
+        // SIGTERM
+        for &pid in &pids_to_kill {
+            let _ = Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .status();
+        }
+
+        if !pids_to_kill.is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+        }
+
+        // SIGKILL 升级：对 SIGTERM 后仍存活的进程强制终止
+        for pid in pids_to_kill {
+            if is_pid_running(pid) {
+                let _ = Command::new("kill")
+                    .args(["-KILL", &pid.to_string()])
+                    .status();
+            }
+            killed.push(pid);
         }
     }
     killed
@@ -1786,6 +1822,7 @@ enum VersionCheckResult {
 fn startup_version_check(app_version: &str, port: u16) -> VersionCheckResult {
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
+        .no_proxy()
         .build()
     {
         Ok(c) => c,
@@ -1914,6 +1951,32 @@ fn startup_reconcile() {
 }
 
 fn main() {
+    // Ensure localhost is always excluded from proxy resolution.
+    //
+    // macOS: Clash/V2Ray set system proxy via Network Preferences. hyper-util
+    //   links `system-configuration` and reads these settings, so ALL reqwest
+    //   clients (including Tauri HTTP plugin's) would route 127.0.0.1 through
+    //   the proxy — which fails because the backend only listens locally.
+    // Windows: similar issue with system proxy via Internet Options.
+    //
+    // We APPEND to any existing NO_PROXY/no_proxy rather than overwrite, so
+    // user-defined exclusions (e.g. *.corp.com) are preserved.
+    // Both cases are set because different libraries check different variants.
+    {
+        const LOCALS: &str = "localhost,127.0.0.1";
+        for key in ["NO_PROXY", "no_proxy"] {
+            let cur = std::env::var(key).unwrap_or_default();
+            if !cur.contains("127.0.0.1") {
+                let val = if cur.is_empty() {
+                    LOCALS.to_string()
+                } else {
+                    format!("{cur},{LOCALS}")
+                };
+                std::env::set_var(key, &val);
+            }
+        }
+    }
+
     // Workaround: NVIDIA drivers on Linux can cause a blank WebKitGTK window
     // due to DMA-BUF renderer incompatibility. Disable it preemptively.
     #[cfg(target_os = "linux")]
@@ -1939,6 +2002,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_http::init())
         .setup(|app| {
             // ── NSIS 安装后以当前用户执行清理（解决“以管理员运行安装程序”时清错目录的问题） ──
             let args: Vec<String> = std::env::args().collect();
@@ -2123,13 +2187,22 @@ fn main() {
                 // Safety-net: clean up backend processes on ANY exit path
                 // (SIGTERM, system shutdown, unexpected termination, etc.)
                 // Idempotent — harmless if tray-quit already stopped everything.
+                //
+                // 直接 kill 进程而非走 HTTP /api/shutdown：
+                //   1. 退出时要尽快完成清理，避免 Finder/macOS 等待超时后强杀本进程
+                //      导致后端沦为孤儿进程。
+                //   2. Python 后端已注册 SIGTERM handler，收到信号即可优雅关闭。
+                //   3. HTTP API 可能因代理、端口状态等原因不可达，增加不确定性。
                 let entries = list_service_pids();
                 for ent in &entries {
                     if ent.started_by == "external" {
                         continue;
                     }
-                    let port = read_workspace_api_port(&ent.workspace_id);
-                    let _ = stop_service_pid_entry(ent, port);
+                    if is_pid_running(ent.pid) {
+                        let _ = kill_pid(ent.pid);
+                    }
+                    let _ = fs::remove_file(std::path::PathBuf::from(&ent.pid_file));
+                    remove_heartbeat_file(&ent.workspace_id);
                 }
                 kill_openakita_orphans();
             }
@@ -3793,6 +3866,7 @@ fn diagnose_via_backend_api(port: u16) -> Option<PythonDiagnostic> {
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(6))
+        .no_proxy()
         .build()
         .ok()?;
 
@@ -4831,30 +4905,33 @@ fn open_file_with_default(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Export the workspace .env file to Downloads as a timestamped backup.
+/// Export the workspace .env file. If `dest_path` is given (from a save dialog),
+/// write there; otherwise fall back to Downloads with a timestamped name.
 #[tauri::command]
-fn export_env_backup(workspace_id: String) -> Result<String, String> {
+fn export_env_backup(workspace_id: String, dest_path: Option<String>) -> Result<String, String> {
     let env_path = workspace_dir(&workspace_id).join(".env");
     if !env_path.exists() {
         return Err("No .env file found in workspace".to_string());
     }
 
-    let downloads_dir = dirs_next::download_dir()
-        .or_else(|| dirs_next::home_dir().map(|h| h.join("Downloads")))
-        .ok_or_else(|| "Cannot determine Downloads directory".to_string())?;
-    fs::create_dir_all(&downloads_dir)
-        .map_err(|e| format!("Cannot create Downloads dir: {e}"))?;
+    let dest = if let Some(p) = dest_path {
+        PathBuf::from(p)
+    } else {
+        let downloads_dir = dirs_next::download_dir()
+            .or_else(|| dirs_next::home_dir().map(|h| h.join("Downloads")))
+            .ok_or_else(|| "Cannot determine Downloads directory".to_string())?;
+        fs::create_dir_all(&downloads_dir)
+            .map_err(|e| format!("Cannot create Downloads dir: {e}"))?;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        downloads_dir.join(format!("openakita-env-backup-{ts}.env"))
+    };
 
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let filename = format!("openakita-env-backup-{ts}.env");
-    let mut dest = downloads_dir.join(&filename);
-    let mut counter = 1u32;
-    while dest.exists() {
-        dest = downloads_dir.join(format!("openakita-env-backup-{ts} ({counter}).env"));
-        counter += 1;
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Cannot create directory: {e}"))?;
     }
 
     fs::copy(&env_path, &dest)
@@ -4863,32 +4940,36 @@ fn export_env_backup(workspace_id: String) -> Result<String, String> {
     Ok(dest.to_string_lossy().to_string())
 }
 
-/// Export diagnostic bundle (logs, llm_debug, system info) as a zip in Downloads.
+/// Export diagnostic bundle (logs, llm_debug, system info) as a zip.
+/// If `dest_path` is given (from a save dialog), write there; otherwise fall back to Downloads.
 #[tauri::command]
 fn export_diagnostic_bundle(
     workspace_id: String,
     system_info_json: Option<String>,
+    dest_path: Option<String>,
 ) -> Result<String, String> {
     let ws_dir = workspace_dir(&workspace_id);
     let logs_dir = ws_dir.join("logs");
     let llm_debug_dir = ws_dir.join("data").join("llm_debug");
 
-    let downloads_dir = dirs_next::download_dir()
-        .or_else(|| dirs_next::home_dir().map(|h| h.join("Downloads")))
-        .ok_or_else(|| "Cannot determine Downloads directory".to_string())?;
-    fs::create_dir_all(&downloads_dir)
-        .map_err(|e| format!("Cannot create Downloads dir: {e}"))?;
+    let dest = if let Some(p) = dest_path {
+        PathBuf::from(p)
+    } else {
+        let downloads_dir = dirs_next::download_dir()
+            .or_else(|| dirs_next::home_dir().map(|h| h.join("Downloads")))
+            .ok_or_else(|| "Cannot determine Downloads directory".to_string())?;
+        fs::create_dir_all(&downloads_dir)
+            .map_err(|e| format!("Cannot create Downloads dir: {e}"))?;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        downloads_dir.join(format!("openakita-diagnostic-{ts}.zip"))
+    };
 
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let zip_name = format!("openakita-diagnostic-{ts}.zip");
-    let mut dest = downloads_dir.join(&zip_name);
-    let mut counter = 1u32;
-    while dest.exists() {
-        dest = downloads_dir.join(format!("openakita-diagnostic-{ts} ({counter}).zip"));
-        counter += 1;
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Cannot create directory: {e}"))?;
     }
 
     let file = fs::File::create(&dest)

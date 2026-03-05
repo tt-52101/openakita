@@ -18,7 +18,6 @@
   - [IM Channel Configuration](#im-channel-configuration)
   - [Identity Configuration (identity/)](#identity-configuration-identity)
   - [Memory System Configuration](#memory-system-configuration)
-  - [Multi-Agent Orchestration](#multi-agent-orchestration)
 - [Starting Services](#starting-services)
 - [Publishing to PyPI](#publishing-to-pypi)
 - [Production Deployment](#production-deployment)
@@ -74,10 +73,8 @@ pip install openakita
 
 # 3. Install optional features
 pip install openakita[feishu]     # + Feishu (Lark) support
-pip install openakita[whisper]    # + Voice recognition
-pip install openakita[browser]    # + Browser AI agent
 pip install openakita[windows]    # + Windows desktop automation
-pip install openakita[all]        # Install all optional features (Windows-only deps are auto-skipped on non-Windows)
+pip install openakita[all]       # Install all optional features (Windows-only deps are auto-skipped on non-Windows)
 
 # 4. Run setup wizard
 openakita init
@@ -147,11 +144,10 @@ The script will automatically:
 3. Create virtual environment
 4. Install dependencies (auto-fallback to Chinese mirror if needed)
 5. Optionally install Playwright browsers
-6. Optionally download Whisper voice model
-7. Initialize `.env` and `data/llm_endpoints.json`
-8. Create all required data directories
-9. Verify installation
-10. Optionally create systemd service (Linux)
+6. Initialize `.env` and `data/llm_endpoints.json`
+7. Create all required data directories
+8. Verify installation
+9. Optionally create systemd service (Linux)
 
 ### Method 3: Source Install
 
@@ -279,8 +275,6 @@ ANTHROPIC_API_KEY=sk-your-api-key-here
 | `EMBEDDING_MODEL` | | `shibing624/text2vec-base-chinese` | Embedding model |
 | `EMBEDDING_DEVICE` | | `cpu` | Compute device (cpu/cuda) |
 | `MEMORY_HISTORY_DAYS` | | `30` | History retention days |
-| **Voice Recognition** | | | |
-| `WHISPER_MODEL` | | `base` | Whisper model size |
 | **GitHub** | | | |
 | `GITHUB_TOKEN` | | - | For searching/downloading skills |
 
@@ -601,30 +595,6 @@ EMBEDDING_DEVICE=cpu                                # Set to cuda if GPU availab
 
 **First launch** will automatically download the embedding model (~100MB).
 
-**Offline deployment** — pre-download:
-```bash
-python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('shibing624/text2vec-base-chinese')"
-```
-
-**GPU acceleration** (optional):
-```bash
-pip install torch --index-url https://download.pytorch.org/whl/cu118
-# Set EMBEDDING_DEVICE=cuda in .env
-```
-
-### Multi-Agent Orchestration
-
-Enable the MasterAgent + Worker architecture for complex tasks:
-
-```ini
-# Configure in .env
-ORCHESTRATION_ENABLED=true
-ORCHESTRATION_BUS_ADDRESS=tcp://127.0.0.1:5555
-ORCHESTRATION_PUB_ADDRESS=tcp://127.0.0.1:5556
-ORCHESTRATION_MIN_WORKERS=1
-ORCHESTRATION_MAX_WORKERS=5
-```
-
 ---
 
 ## Starting Services
@@ -836,15 +806,6 @@ playwright install chromium
 1. Verify Token is correct
 2. Users in mainland China must configure `TELEGRAM_PROXY`
 3. Ensure the proxy can reach `api.telegram.org`
-
-### Q: Out of memory?
-
-```bash
-# Use CPU-only PyTorch (saves ~2GB)
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-# Use a smaller embedding model
-# EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
-```
 
 ### Q: How to verify LLM endpoint configuration?
 
