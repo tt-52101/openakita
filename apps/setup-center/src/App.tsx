@@ -590,15 +590,16 @@ export function App() {
     (async () => {
       await refreshAll();
       if (cancelled) return;
-      setApiBaseUrl("");
+      const capBase = IS_CAPACITOR ? apiBaseUrl : "";
+      if (!IS_CAPACITOR) setApiBaseUrl("");
       setServiceStatus({ running: true, pid: null, pidFile: "" });
       try {
-        const hRes = await safeFetch("/api/health", { signal: AbortSignal.timeout(3_000) });
+        const hRes = await safeFetch(`${capBase}/api/health`, { signal: AbortSignal.timeout(3_000) });
         const hData = await hRes.json();
         if (hData.version) setBackendVersion(hData.version);
       } catch { /* ignore */ }
-      try { await refreshStatus("local", "", true); } catch { /* ignore */ }
-      autoCheckEndpoints("");
+      try { await refreshStatus("local", capBase, true); } catch { /* ignore */ }
+      autoCheckEndpoints(capBase);
     })();
     return () => { cancelled = true; };
   }, [webAuthed]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1745,7 +1746,7 @@ export function App() {
   }
 
   function httpApiBase(): string {
-    if (IS_WEB) return apiBaseUrl || "";
+    if (IS_WEB || IS_CAPACITOR) return apiBaseUrl || "";
     return dataMode === "remote" ? apiBaseUrl : "http://127.0.0.1:18900";
   }
 

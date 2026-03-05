@@ -48,7 +48,12 @@ export async function getAppVersion(): Promise<string> {
     return getVersion();
   }
   try {
-    const res = await fetch("/api/health", { signal: AbortSignal.timeout(3000) });
+    let base = "";
+    if (IS_CAPACITOR) {
+      const { getActiveServer } = await import("./servers");
+      base = getActiveServer()?.url || "";
+    }
+    const res = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(3000) });
     if (res.ok) {
       const data = await res.json();
       return data.version || "0.0.0";

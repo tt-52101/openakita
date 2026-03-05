@@ -2,8 +2,9 @@
 // Replaces Tauri listen() events in web mode.
 // Auto-reconnects on disconnect with exponential backoff.
 
-import { IS_WEB } from "./detect";
+import { IS_TAURI, IS_CAPACITOR } from "./detect";
 import { getAccessToken, isTokenExpiringSoon, refreshAccessToken } from "./auth";
+import { getActiveServer } from "./servers";
 
 export type WsEventHandler = (event: string, data: unknown) => void;
 
@@ -17,11 +18,24 @@ let _connected = false;
 let _intentionallyClosed = false;
 
 function getWsUrl(): string {
-  const loc = window.location;
-  const proto = loc.protocol === "https:" ? "wss:" : "ws:";
+  let host: string;
+  let proto: string;
+
+  if (IS_CAPACITOR) {
+    const server = getActiveServer();
+    if (!server) return "";
+    const url = new URL(server.url);
+    host = url.host;
+    proto = url.protocol === "https:" ? "wss:" : "ws:";
+  } else {
+    const loc = window.location;
+    host = loc.host;
+    proto = loc.protocol === "https:" ? "wss:" : "ws:";
+  }
+
   const token = getAccessToken();
   const params = token ? `?token=${encodeURIComponent(token)}` : "";
-  return `${proto}//${loc.host}/ws/events${params}`;
+  return `${proto}//${host}/ws/events${params}`;
 }
 
 function _connect(): void {
@@ -96,7 +110,7 @@ function _scheduleReconnect(): void {
  * In Tauri mode this is a no-op (Tauri events are used instead).
  */
 export function onWsEvent(handler: WsEventHandler): () => void {
-  if (!IS_WEB) return () => {};
+  if (IS_TAURI) return () => {};
 
   _handlers.push(handler);
   // Ensure connection is started
