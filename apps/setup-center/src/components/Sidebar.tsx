@@ -176,7 +176,6 @@ export function Sidebar({
         <div style={{
           padding: "12px 18px",
           borderTop: "1px solid var(--line)",
-          marginTop: "auto",
         }}>
           <div style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
