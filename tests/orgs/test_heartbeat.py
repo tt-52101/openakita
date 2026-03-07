@@ -88,6 +88,65 @@ class TestTriggerHeartbeat:
         assert len(events2) >= 1
 
 
+class TestHeartbeatWithCoreBusiness:
+    """Tests for heartbeat behavior when core_business is set (v1.3)."""
+
+    async def test_heartbeat_uses_review_mode(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+        persisted_org.core_business = "做一个 AI 产品，当前阶段目标：完成 MVP"
+        mock_runtime.send_command = AsyncMock(return_value={"result": "复盘完成"})
+        result = await heartbeat.trigger_heartbeat(persisted_org.id)
+
+        prompt = mock_runtime.send_command.call_args[0][2]
+        assert "经营复盘" in prompt
+        assert "心跳检查" not in prompt
+        assert "核心业务目标" in prompt
+        assert "做一个 AI 产品" in prompt
+
+    async def test_heartbeat_review_includes_blackboard_step(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+        persisted_org.core_business = "电商运营"
+        mock_runtime.send_command = AsyncMock(return_value={"result": "ok"})
+        await heartbeat.trigger_heartbeat(persisted_org.id)
+
+        prompt = mock_runtime.send_command.call_args[0][2]
+        assert "org_read_blackboard" in prompt
+        assert "回顾" in prompt or "查看黑板" in prompt
+
+    async def test_heartbeat_without_core_business_uses_check_mode(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+        persisted_org.core_business = ""
+        mock_runtime.send_command = AsyncMock(return_value={"result": "ok"})
+        await heartbeat.trigger_heartbeat(persisted_org.id)
+
+        prompt = mock_runtime.send_command.call_args[0][2]
+        assert "心跳检查" in prompt
+        assert "经营复盘" not in prompt
+
+    async def test_heartbeat_uses_dynamic_persona_label(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+        from openakita.orgs.models import UserPersona
+        persisted_org.core_business = "内容运营"
+        persisted_org.user_persona = UserPersona(title="出品人", display_name="出品人")
+        mock_runtime.send_command = AsyncMock(return_value={"result": "ok"})
+        await heartbeat.trigger_heartbeat(persisted_org.id)
+
+        prompt = mock_runtime.send_command.call_args[0][2]
+        assert "出品人" in prompt
+
+    async def test_heartbeat_no_hardcoded_ceo(self, heartbeat: OrgHeartbeat, persisted_org, mock_runtime):
+        """Ensure the heartbeat prompt template itself doesn't hardcode 'CEO'."""
+        persisted_org.core_business = "研究课题"
+        persisted_org.nodes[0].role_title = "课题负责人"
+        mock_runtime.send_command = AsyncMock(return_value={"result": "ok"})
+        await heartbeat.trigger_heartbeat(persisted_org.id)
+
+        prompt = mock_runtime.send_command.call_args[0][2]
+        prompt_lines = prompt.split("\n")
+        for line in prompt_lines:
+            if "课题负责人" in line or "CEO" in line:
+                continue
+            if line.startswith("- ") and "CEO" in line:
+                continue
+        assert "课题负责人" in prompt
+
+
 class TestTriggerStandup:
     async def test_trigger_nonexistent_org(self, heartbeat: OrgHeartbeat, mock_runtime):
         mock_runtime.get_org = MagicMock(return_value=None)

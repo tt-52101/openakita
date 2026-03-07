@@ -140,10 +140,32 @@ class OrgHeartbeat:
 
         persona_label = org.user_persona.label if org.user_persona else "用户"
 
+        biz_section = ""
+        if org.core_business:
+            biz_section = (
+                f"## 核心业务目标\n{org.core_business}\n\n"
+            )
+
+        if org.core_business:
+            review_intro = (
+                f"[经营复盘] 当前时间: {_now_iso()}\n\n"
+                f"组织: {org.name}\n\n"
+                f"{biz_section}"
+                f"这是定期经营复盘，请回顾进展并推进下一阶段工作：\n"
+                f"1. 先查看黑板（org_read_blackboard）了解上次的决策和进展\n"
+                f"2. 评估各节点执行情况，识别阻塞和偏差\n"
+                f"3. 调整策略、分配新任务、推进未完成的工作\n"
+                f"4. 将本轮复盘结论和下一步计划写入黑板\n\n"
+            )
+        else:
+            review_intro = (
+                f"[心跳检查] 当前时间: {_now_iso()}\n\n"
+                f"组织: {org.name}\n"
+                f"心跳提示: {org.heartbeat_prompt}\n\n"
+            )
+
         prompt = (
-            f"[心跳检查] 当前时间: {_now_iso()}\n\n"
-            f"组织: {org.name}\n"
-            f"心跳提示: {org.heartbeat_prompt}\n\n"
+            f"{review_intro}"
             f"## 各节点状态\n{nl.join(node_summaries)}\n\n"
             f"## 组织黑板摘要\n{blackboard_summary}\n\n"
             f"{action_guidance}\n\n"

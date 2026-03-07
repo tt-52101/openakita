@@ -220,6 +220,9 @@ class OrgRuntime:
             "org_id": org_id, "status": "active"
         })
 
+        if org.core_business and org.core_business.strip():
+            asyncio.ensure_future(self._auto_kickoff(org))
+
         return org
 
     async def stop_org(self, org_id: str) -> Organization:
@@ -322,6 +325,43 @@ class OrgRuntime:
 
         result = await self._activate_and_run(org, target, tagged_content)
         return result
+
+    async def _auto_kickoff(self, org: Organization) -> None:
+        """Auto-activate the root node with a mission briefing when org starts
+        with core_business set. This enables continuous autonomous operations."""
+        try:
+            roots = org.get_root_nodes()
+            if not roots:
+                return
+            root = roots[0]
+            persona_label = org.user_persona.label if org.user_persona else "负责人"
+
+            prompt = (
+                f"[组织启动 — 经营任务书]\n\n"
+                f"你是「{org.name}」的 {root.role_title}，组织刚刚启动。\n"
+                f"{persona_label}委托你全权负责以下核心业务：\n\n"
+                f"---\n{org.core_business.strip()}\n---\n\n"
+                f"## 你现在需要做的\n\n"
+                f"1. **制定工作策略**：根据核心业务目标，拟定具体的行动计划和阶段性目标\n"
+                f"2. **分解和委派**：将工作拆解为具体任务，用 org_delegate_task 分派给合适的下属\n"
+                f"3. **启动执行**：不要等待进一步指令，立即开始推进最优先的工作\n"
+                f"4. **记录决策**：将工作策略、任务分工、阶段目标写入黑板（org_write_blackboard）\n\n"
+                f"## 工作原则\n\n"
+                f"- 你是本组织的最高负责人，应自主判断、持续推进，不需要等{persona_label}下达每一步指令\n"
+                f"- {persona_label}的指令是方向性调整和补充，日常工作由你全权决策\n"
+                f"- 遇到重大决策或风险时，通过黑板记录，{persona_label}会在查看组织状态时看到\n"
+                f"- 定期复盘进度，调整策略，确保持续向目标推进\n\n"
+                f"现在开始工作。"
+            )
+
+            self.get_event_store(org.id).emit(
+                "auto_kickoff", "system",
+                {"root_node": root.id, "core_business_len": len(org.core_business)},
+            )
+
+            await self._activate_and_run(org, root, prompt)
+        except Exception as e:
+            logger.error(f"[OrgRuntime] Auto-kickoff failed for {org.id}: {e}")
 
     # ------------------------------------------------------------------
     # Node activation

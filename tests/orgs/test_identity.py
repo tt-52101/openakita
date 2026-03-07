@@ -8,7 +8,7 @@ import pytest
 
 from openakita.orgs.identity import OrgIdentity, ResolvedIdentity
 from openakita.orgs.models import Organization, OrgNode
-from .conftest import make_org, make_node
+from .conftest import make_org, make_node, make_edge
 
 
 @pytest.fixture()
@@ -85,6 +85,103 @@ class TestBuildOrgContextPrompt:
             policy_index="- 沟通规范.md\n- 任务管理.md",
         )
         assert "沟通规范" in prompt
+
+
+class TestCoreBusiness:
+    """Tests for core_business prompt injection (v1.3)."""
+
+    def test_root_node_gets_continuous_duty(self, identity: OrgIdentity):
+        org = make_org(core_business="做一个内容平台")
+        root = org.nodes[0]  # level=0
+        resolved = identity.resolve(root, org)
+        prompt = identity.build_org_context_prompt(root, org, resolved)
+        assert "核心业务" in prompt
+        assert "连续工作职责" in prompt
+        assert "最高负责人" in prompt
+        assert "做一个内容平台" in prompt
+
+    def test_non_root_node_gets_supporting_prompt(self, identity: OrgIdentity):
+        org = make_org(core_business="做一个内容平台")
+        non_root = org.nodes[1]  # level=1
+        resolved = identity.resolve(non_root, org)
+        prompt = identity.build_org_context_prompt(non_root, org, resolved)
+        assert "核心业务" in prompt
+        assert "做一个内容平台" in prompt
+        assert "连续工作职责" not in prompt
+        assert "主动配合上级" in prompt
+
+    def test_no_core_business_no_section(self, identity: OrgIdentity):
+        org = make_org(core_business="")
+        root = org.nodes[0]
+        resolved = identity.resolve(root, org)
+        prompt = identity.build_org_context_prompt(root, org, resolved)
+        assert "核心业务" not in prompt
+        assert "连续工作职责" not in prompt
+
+    def test_root_prompt_uses_dynamic_persona_label(self, identity: OrgIdentity):
+        from openakita.orgs.models import UserPersona
+        org = make_org(
+            core_business="研发 AI 产品",
+            user_persona=UserPersona(title="投资人", display_name="王总"),
+        )
+        root = org.nodes[0]
+        resolved = identity.resolve(root, org)
+        prompt = identity.build_org_context_prompt(root, org, resolved)
+        assert "王总" in prompt
+        assert "不需要等王总" in prompt or "等王总" in prompt
+
+    def test_root_prompt_uses_default_persona(self, identity: OrgIdentity):
+        org = make_org(core_business="项目开发")
+        root = org.nodes[0]
+        resolved = identity.resolve(root, org)
+        prompt = identity.build_org_context_prompt(root, org, resolved)
+        assert "负责人" in prompt
+
+    def test_root_prompt_no_hardcoded_ceo(self, identity: OrgIdentity):
+        """Ensure generic prompt templates don't hardcode 'CEO' — use a custom org with no CEO/CTO."""
+        org = make_org(
+            core_business="内容运营",
+            nodes=[
+                make_node("node_chief", "主编", 0, "编辑部"),
+                make_node("node_writer", "写手", 1, "创作组"),
+            ],
+            edges=[make_edge("node_chief", "node_writer")],
+        )
+        root = org.nodes[0]
+        resolved = identity.resolve(root, org)
+        prompt = identity.build_org_context_prompt(root, org, resolved)
+        template_sections = ["核心业务", "连续工作职责", "组织工具与行为约束",
+                             "你的权限", "制度与流程", "行为准则"]
+        for section_name in template_sections:
+            idx = prompt.find(section_name)
+            if idx < 0:
+                continue
+            section_end = prompt.find("\n## ", idx + 1)
+            section_text = prompt[idx:section_end] if section_end > 0 else prompt[idx:]
+            assert "CEO" not in section_text, (
+                f"Found hardcoded 'CEO' in template section '{section_name}'"
+            )
+
+
+class TestUserPersonaInPrompt:
+    """Tests for user_persona in org prompt (v1.1)."""
+
+    def test_root_shows_persona_as_superior(self, identity: OrgIdentity):
+        from openakita.orgs.models import UserPersona
+        org = make_org(user_persona=UserPersona(title="甲方", display_name="客户A"))
+        root = org.nodes[0]
+        resolved = identity.resolve(root, org)
+        prompt = identity.build_org_context_prompt(root, org, resolved)
+        assert "客户A" in prompt
+        assert "直属上级" in prompt
+
+    def test_non_root_shows_parent_as_superior(self, identity: OrgIdentity):
+        org = make_org()
+        non_root = org.nodes[1]
+        resolved = identity.resolve(non_root, org)
+        prompt = identity.build_org_context_prompt(non_root, org, resolved)
+        assert "直属上级" in prompt
+        assert org.nodes[0].role_title in prompt
 
 
 class TestMCPConfig:

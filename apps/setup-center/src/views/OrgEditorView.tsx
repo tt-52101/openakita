@@ -87,6 +87,9 @@ interface OrgNodeData {
   frozen_reason: string | null;
   frozen_at: string | null;
   status: string;
+  auto_clone_enabled?: boolean;
+  auto_clone_threshold?: number;
+  auto_clone_max?: number;
 }
 
 interface OrgEdgeData {
@@ -475,7 +478,7 @@ export function OrgEditorView({
   const [saving, setSaving] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showNewNodeForm, setShowNewNodeForm] = useState(false);
-  const [propsTab, setPropsTab] = useState<"basic" | "identity" | "tools" | "mcp" | "advanced" | "live">("basic");
+  const [propsTab, setPropsTab] = useState<"basic" | "identity" | "capabilities" | "advanced" | "live">("basic");
   const [fullPromptPreview, setFullPromptPreview] = useState<string | null>(null);
   const [promptPreviewLoading, setPromptPreviewLoading] = useState(false);
   const [liveMode, setLiveMode] = useState(false);
@@ -490,7 +493,20 @@ export function OrgEditorView({
 
   // MCP/Skill lists for selection
   const [availableMcpServers, setAvailableMcpServers] = useState<{ name: string; status: string }[]>([]);
-  const [availableSkills, setAvailableSkills] = useState<{ name: string; description?: string }[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<{ name: string; description?: string; name_i18n?: string; description_i18n?: string }[]>([]);
+
+  // Blackboard state
+  const [bbEntries, setBbEntries] = useState<any[]>([]);
+  const [bbScope, setBbScope] = useState<"all" | "org" | "department" | "node">("all");
+
+  // Capabilities search
+  const [mcpSearch, setMcpSearch] = useState("");
+  const [skillSearch, setSkillSearch] = useState("");
+
+  // Org settings panel collapse
+  const [personaCollapsed, setPersonaCollapsed] = useState(false);
+  const [bizCollapsed, setBizCollapsed] = useState(false);
+  const [bbLoading, setBbLoading] = useState(false);
 
   // New node form
   const [newNodeTitle, setNewNodeTitle] = useState("");
@@ -568,6 +584,21 @@ export function OrgEditorView({
     } catch { /* skills endpoint may not be available */ }
   }, [apiBaseUrl]);
 
+  const fetchBlackboard = useCallback(async (orgId: string, scope?: string) => {
+    setBbLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "100" });
+      if (scope && scope !== "all") params.set("scope", scope);
+      const res = await safeFetch(`${apiBaseUrl}/api/orgs/${orgId}/memory?${params}`);
+      const data = await res.json();
+      setBbEntries(data || []);
+    } catch {
+      setBbEntries([]);
+    } finally {
+      setBbLoading(false);
+    }
+  }, [apiBaseUrl]);
+
   useEffect(() => {
     if (visible) {
       fetchOrgList();
@@ -582,6 +613,12 @@ export function OrgEditorView({
       fetchOrg(selectedOrgId);
     }
   }, [selectedOrgId, fetchOrg]);
+
+  useEffect(() => {
+    if (currentOrg && !selectedNodeId) {
+      fetchBlackboard(currentOrg.id, bbScope);
+    }
+  }, [currentOrg?.id, selectedNodeId, bbScope, fetchBlackboard]);
 
   // ── WebSocket for live mode ──
   useEffect(() => {
@@ -657,6 +694,7 @@ export function OrgEditorView({
           name: currentOrg.name,
           description: currentOrg.description,
           user_persona: currentOrg.user_persona || { title: "负责人", display_name: "", description: "" },
+          core_business: currentOrg.core_business || "",
           heartbeat_enabled: currentOrg.heartbeat_enabled,
           heartbeat_interval_s: currentOrg.heartbeat_interval_s,
           standup_enabled: currentOrg.standup_enabled,
@@ -1303,8 +1341,8 @@ export function OrgEditorView({
           {/* Tabs */}
           <div style={{ display: "flex", borderBottom: "1px solid var(--line)" }}>
             {(liveMode
-              ? (["live", "basic", "identity", "tools", "mcp", "advanced"] as const)
-              : (["basic", "identity", "tools", "mcp", "advanced"] as const)
+              ? (["live", "basic", "identity", "capabilities", "advanced"] as const)
+              : (["basic", "identity", "capabilities", "advanced"] as const)
             ).map((tab) => (
               <button
                 key={tab}
@@ -1323,7 +1361,7 @@ export function OrgEditorView({
                   cursor: "pointer",
                 }}
               >
-                {tab === "live" ? "实况" : tab === "basic" ? "基本" : tab === "identity" ? "身份" : tab === "tools" ? "工具" : tab === "mcp" ? "MCP" : "高级"}
+                {tab === "live" ? "实况" : tab === "basic" ? "基本" : tab === "identity" ? "身份" : tab === "capabilities" ? "能力" : "高级"}
               </button>
             ))}
           </div>
@@ -1677,36 +1715,66 @@ export function OrgEditorView({
               </div>
             )}
 
-            {propsTab === "tools" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>
-                    外部执行工具
-                  </div>
-                  <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 8 }}>
-                    选择该节点可使用的外部工具类目。未选择时只能使用 org_* 组织协作工具。
-                  </div>
+            {propsTab === "capabilities" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+
+                {/* ── Section 1: 执行工具类目 ── */}
+                <div style={{
+                  border: "1px solid var(--line)", borderRadius: 8,
+                  background: "var(--bg-card, #fff)", overflow: "hidden",
+                }}>
                   <div style={{
-                    border: "1px solid var(--line)", borderRadius: 8, padding: 4,
+                    padding: "8px 10px", borderBottom: "1px solid var(--line)",
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
                   }}>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>执行工具</div>
+                      <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 2 }}>
+                        未选择时只能使用组织协作工具
+                      </div>
+                    </div>
+                    <button
+                      className="btnSmall"
+                      style={{ fontSize: 10, padding: "2px 8px", flexShrink: 0 }}
+                      onClick={() => {
+                        const title = (selectedNode.role_title || "").toLowerCase();
+                        let preset: string[] = ["research", "memory"];
+                        if (title.includes("ceo") || title.includes("执行官")) preset = ["research", "planning", "memory"];
+                        else if (title.includes("cto") || title.includes("技术总监")) preset = ["research", "planning", "filesystem", "memory"];
+                        else if (title.includes("cmo") || title.includes("市场")) preset = ["research", "planning", "memory"];
+                        else if (title.includes("cpo") || title.includes("产品总监")) preset = ["research", "planning", "memory"];
+                        else if (title.includes("工程师") || title.includes("开发") || title.includes("dev")) preset = ["filesystem", "memory"];
+                        else if (title.includes("运营") || title.includes("content")) preset = ["research", "filesystem", "memory"];
+                        else if (title.includes("设计") || title.includes("design")) preset = ["browser", "filesystem"];
+                        else if (title.includes("产品经理") || title.includes("pm")) preset = ["research", "planning", "memory"];
+                        else if (title.includes("seo")) preset = ["research", "memory"];
+                        else if (title.includes("devops")) preset = ["filesystem", "memory"];
+                        updateNodeData("external_tools", preset);
+                      }}
+                      title="根据岗位角色自动推荐工具"
+                    >
+                      自动推荐
+                    </button>
+                  </div>
+                  <div style={{ padding: 4, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
                     {[
-                      { key: "research", label: "信息搜索", desc: "web_search, news_search" },
-                      { key: "planning", label: "计划管理", desc: "create_plan, update_plan_step, ..." },
-                      { key: "filesystem", label: "文件与命令", desc: "read_file, write_file, run_shell, ..." },
-                      { key: "memory", label: "记忆管理", desc: "add_memory, search_memory" },
-                      { key: "mcp", label: "MCP 工具", desc: "call_mcp_tool, list_mcp_servers" },
-                      { key: "browser", label: "浏览器", desc: "browser_task, browser_open, ..." },
-                      { key: "communication", label: "通信投递", desc: "deliver_artifacts, get_chat_history" },
+                      { key: "research", label: "搜索", icon: "🔍" },
+                      { key: "planning", label: "计划", icon: "📋" },
+                      { key: "filesystem", label: "文件/命令", icon: "📁" },
+                      { key: "memory", label: "记忆", icon: "🧠" },
+                      { key: "browser", label: "浏览器", icon: "🌐" },
+                      { key: "communication", label: "通信", icon: "📨" },
                     ].map((cat) => {
                       const checked = (selectedNode.external_tools || []).includes(cat.key);
                       return (
                         <label
                           key={cat.key}
                           style={{
-                            display: "flex", alignItems: "center", gap: 8,
-                            padding: "6px 8px", borderRadius: 6, cursor: "pointer",
-                            fontSize: 12,
-                            background: checked ? "rgba(14,165,233,0.08)" : "transparent",
+                            display: "flex", alignItems: "center", gap: 6,
+                            padding: "5px 8px", borderRadius: 6, cursor: "pointer",
+                            fontSize: 11,
+                            background: checked ? "rgba(14,165,233,0.1)" : "transparent",
+                            transition: "background 0.15s",
                           }}
                         >
                           <input
@@ -1719,66 +1787,54 @@ export function OrgEditorView({
                                 : [...cur, cat.key];
                               updateNodeData("external_tools", next);
                             }}
-                            style={{ accentColor: "var(--primary)", flexShrink: 0 }}
+                            style={{ accentColor: "var(--primary)", flexShrink: 0, width: 14, height: 14 }}
                           />
-                          <div style={{ flex: 1 }}>
-                            <div>{cat.label}</div>
-                            <div style={{ fontSize: 9, color: "var(--muted)" }}>{cat.desc}</div>
-                          </div>
+                          <span>{cat.icon} {cat.label}</span>
                         </label>
                       );
                     })}
                   </div>
-                  {(selectedNode.external_tools || []).length > 0 && (
-                    <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
-                      已启用 {selectedNode.external_tools.length} 个类目
-                    </div>
-                  )}
                 </div>
 
-                <button
-                  className="btnSmall"
-                  style={{ fontSize: 11, alignSelf: "flex-start" }}
-                  onClick={() => {
-                    const title = (selectedNode.role_title || "").toLowerCase();
-                    let preset: string[] = ["research", "memory"];
-                    if (title.includes("ceo") || title.includes("执行官")) preset = ["research", "planning", "memory"];
-                    else if (title.includes("cto") || title.includes("技术总监")) preset = ["research", "planning", "filesystem", "memory"];
-                    else if (title.includes("cmo") || title.includes("市场")) preset = ["research", "planning", "memory"];
-                    else if (title.includes("cpo") || title.includes("产品总监")) preset = ["research", "planning", "memory"];
-                    else if (title.includes("工程师") || title.includes("开发") || title.includes("dev")) preset = ["filesystem", "memory"];
-                    else if (title.includes("运营") || title.includes("content")) preset = ["research", "filesystem", "memory"];
-                    else if (title.includes("设计") || title.includes("design")) preset = ["browser", "filesystem"];
-                    else if (title.includes("产品经理") || title.includes("pm")) preset = ["research", "planning", "memory"];
-                    else if (title.includes("seo")) preset = ["research", "memory"];
-                    else if (title.includes("devops")) preset = ["filesystem", "memory"];
-                    updateNodeData("external_tools", preset);
-                  }}
-                >
-                  按角色推荐
-                </button>
-              </div>
-            )}
-
-            {propsTab === "mcp" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>MCP 服务器</div>
+                {/* ── Section 2: MCP 服务器 ── */}
+                <div style={{
+                  border: "1px solid var(--line)", borderRadius: 8,
+                  background: "var(--bg-card, #fff)", overflow: "hidden",
+                }}>
+                  <div style={{
+                    padding: "8px 10px", borderBottom: "1px solid var(--line)",
+                  }}>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>MCP 服务器</div>
+                    <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 2 }}>
+                      节点可调用的外部服务接口
+                    </div>
+                  </div>
+                  {availableMcpServers.length > 3 && (
+                    <div style={{ padding: "4px 6px 0" }}>
+                      <input
+                        className="input"
+                        placeholder="搜索服务器..."
+                        value={mcpSearch}
+                        onChange={(e) => setMcpSearch(e.target.value)}
+                        style={{ fontSize: 11, width: "100%", padding: "4px 8px" }}
+                      />
+                    </div>
+                  )}
                   {availableMcpServers.length > 0 ? (
-                    <div style={{
-                      maxHeight: 180, overflowY: "auto",
-                      border: "1px solid var(--line)", borderRadius: 8, padding: 4,
-                    }}>
-                      {availableMcpServers.map((srv) => {
+                    <div style={{ padding: 4, maxHeight: 150, overflowY: "auto" }}>
+                      {availableMcpServers
+                        .filter((srv) => !mcpSearch || srv.name.toLowerCase().includes(mcpSearch.toLowerCase()))
+                        .map((srv) => {
                         const checked = selectedNode.mcp_servers.includes(srv.name);
                         return (
                           <label
                             key={srv.name}
                             style={{
-                              display: "flex", alignItems: "center", gap: 8,
+                              display: "flex", alignItems: "center", gap: 6,
                               padding: "5px 8px", borderRadius: 6, cursor: "pointer",
-                              fontSize: 12,
-                              background: checked ? "rgba(14,165,233,0.08)" : "transparent",
+                              fontSize: 11,
+                              background: checked ? "rgba(14,165,233,0.1)" : "transparent",
+                              transition: "background 0.15s",
                             }}
                           >
                             <input
@@ -1790,49 +1846,82 @@ export function OrgEditorView({
                                   : [...selectedNode.mcp_servers, srv.name];
                                 updateNodeData("mcp_servers", next);
                               }}
-                              style={{ accentColor: "var(--primary)", flexShrink: 0 }}
+                              style={{ accentColor: "var(--primary)", flexShrink: 0, width: 14, height: 14 }}
                             />
-                            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{srv.name}</span>
+                            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {srv.name}
+                            </span>
                             <span style={{
-                              fontSize: 9, padding: "1px 5px", borderRadius: 3,
+                              fontSize: 9, padding: "1px 5px", borderRadius: 3, flexShrink: 0,
                               background: srv.status === "connected" ? "#dcfce7" : "#f3f4f6",
                               color: srv.status === "connected" ? "#166534" : "#9ca3af",
                             }}>
-                              {srv.status === "connected" ? "已连接" : "未连接"}
+                              {srv.status === "connected" ? "在线" : "离线"}
                             </span>
                           </label>
                         );
                       })}
                     </div>
                   ) : (
-                    <div style={{ fontSize: 11, color: "var(--muted)", padding: "8px 0" }}>
-                      暂无可用 MCP 服务器，请在 MCP 管理中添加
+                    <div style={{ fontSize: 10, color: "var(--muted)", padding: "10px" }}>
+                      暂无可用服务器
                     </div>
                   )}
                   {selectedNode.mcp_servers.length > 0 && (
-                    <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
+                    <div style={{ fontSize: 9, color: "var(--muted)", padding: "2px 10px 6px", borderTop: "1px solid var(--line)" }}>
                       已选 {selectedNode.mcp_servers.length} 个
                     </div>
                   )}
                 </div>
 
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>技能</div>
+                {/* ── Section 3: 技能 ── */}
+                <div style={{
+                  border: "1px solid var(--line)", borderRadius: 8,
+                  background: "var(--bg-card, #fff)", overflow: "hidden",
+                }}>
+                  <div style={{
+                    padding: "8px 10px", borderBottom: "1px solid var(--line)",
+                  }}>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>技能</div>
+                    <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 2 }}>
+                      已安装的专业技能包
+                    </div>
+                  </div>
+                  {availableSkills.length > 3 && (
+                    <div style={{ padding: "4px 6px 0" }}>
+                      <input
+                        className="input"
+                        placeholder="搜索技能..."
+                        value={skillSearch}
+                        onChange={(e) => setSkillSearch(e.target.value)}
+                        style={{ fontSize: 11, width: "100%", padding: "4px 8px" }}
+                      />
+                    </div>
+                  )}
                   {availableSkills.length > 0 ? (
-                    <div style={{
-                      maxHeight: 180, overflowY: "auto",
-                      border: "1px solid var(--line)", borderRadius: 8, padding: 4,
-                    }}>
-                      {availableSkills.map((skill) => {
+                    <div style={{ padding: 4, maxHeight: 150, overflowY: "auto" }}>
+                      {availableSkills
+                        .filter((skill) => {
+                          if (!skillSearch) return true;
+                          const q = skillSearch.toLowerCase();
+                          return (skill.name_i18n || "").toLowerCase().includes(q)
+                            || skill.name.toLowerCase().includes(q)
+                            || (skill.description_i18n || "").toLowerCase().includes(q)
+                            || (skill.description || "").toLowerCase().includes(q);
+                        })
+                        .map((skill) => {
                         const checked = selectedNode.skills.includes(skill.name);
+                        const displayName = skill.name_i18n || skill.name;
+                        const displayDesc = skill.description_i18n || skill.description || "";
                         return (
                           <label
                             key={skill.name}
                             style={{
-                              display: "flex", alignItems: "center", gap: 8,
+                              display: "flex", alignItems: "flex-start", gap: 6,
                               padding: "5px 8px", borderRadius: 6, cursor: "pointer",
-                              fontSize: 12,
-                              background: checked ? "rgba(14,165,233,0.08)" : "transparent",
+                              fontSize: 11,
+                              background: checked ? "rgba(14,165,233,0.1)" : "transparent",
+                              transition: "background 0.15s",
                             }}
                           >
                             <input
@@ -1844,26 +1933,54 @@ export function OrgEditorView({
                                   : [...selectedNode.skills, skill.name];
                                 updateNodeData("skills", next);
                               }}
-                              style={{ accentColor: "var(--primary)", flexShrink: 0 }}
+                              style={{ accentColor: "var(--primary)", flexShrink: 0, width: 14, height: 14, marginTop: 2 }}
                             />
-                            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {skill.name}
-                            </span>
+                            <div style={{ flex: 1, overflow: "hidden" }}>
+                              <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {displayName}
+                              </div>
+                              {displayDesc && (
+                                <div style={{ fontSize: 9, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {displayDesc}
+                                </div>
+                              )}
+                            </div>
                           </label>
                         );
                       })}
                     </div>
                   ) : (
-                    <div style={{ fontSize: 11, color: "var(--muted)", padding: "8px 0" }}>
-                      暂无可用技能，请在技能管理中安装
+                    <div style={{ fontSize: 10, color: "var(--muted)", padding: "10px" }}>
+                      暂无可用技能
                     </div>
                   )}
                   {selectedNode.skills.length > 0 && (
-                    <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
+                    <div style={{ fontSize: 9, color: "var(--muted)", padding: "2px 10px 6px", borderTop: "1px solid var(--line)" }}>
                       已选 {selectedNode.skills.length} 个
                     </div>
                   )}
                 </div>
+
+                {/* ── 需要启用 MCP 工具类目提示 ── */}
+                {selectedNode.mcp_servers.length > 0 && !(selectedNode.external_tools || []).includes("mcp") && (
+                  <div style={{
+                    fontSize: 10, color: "#b45309", background: "#fffbeb",
+                    padding: "6px 10px", borderRadius: 6, border: "1px solid #fde68a",
+                    lineHeight: 1.5,
+                  }}>
+                    已选择 MCP 服务器但未启用"搜索"等工具类目中的 MCP 调用能力。
+                    <button
+                      className="btnSmall"
+                      style={{ fontSize: 10, marginLeft: 4, padding: "1px 6px", verticalAlign: "middle" }}
+                      onClick={() => {
+                        const cur = selectedNode.external_tools || [];
+                        if (!cur.includes("mcp")) updateNodeData("external_tools", [...cur, "mcp"]);
+                      }}
+                    >
+                      一键启用
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2015,7 +2132,7 @@ export function OrgEditorView({
       {currentOrg && !selectedNode && !isMobile && (
         <div
           style={{
-            width: 280,
+            width: 300,
             borderLeft: "1px solid var(--line)",
             overflowY: "auto",
             background: "var(--bg-app)",
@@ -2025,78 +2142,270 @@ export function OrgEditorView({
         >
           <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>组织设置</div>
 
+          {/* ── 核心业务 ── */}
           <div className="card" style={{ padding: 10, marginBottom: 10 }}>
-            <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>👤 我的身份</div>
-            <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 8, lineHeight: 1.5 }}>
-              你在本组织中的角色设定。节点会以此身份认知你（如"来自董事长的指令"）。
+            <div
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
+              onClick={() => setBizCollapsed(!bizCollapsed)}
+            >
+              <div style={{ fontWeight: 600, fontSize: 12 }}>
+                核心业务
+                {bizCollapsed && (currentOrg.core_business || "").trim() && (
+                  <span style={{ fontWeight: 400, fontSize: 10, color: "var(--ok)", marginLeft: 6 }}>已配置</span>
+                )}
+              </div>
+              <span style={{ fontSize: 10, color: "var(--muted)" }}>{bizCollapsed ? "▸" : "▾"}</span>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <div>
-                <label style={{ fontSize: 10, color: "var(--muted)", display: "block", marginBottom: 2 }}>头衔</label>
-                <input
+            {!bizCollapsed && (
+              <div style={{ marginTop: 6 }}>
+                <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 6, lineHeight: 1.5 }}>
+                  填写后组织启动即自主运转——顶层负责人自动接收任务书并开始工作，心跳变为定期复盘。
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 8 }}>
+                  {[
+                    { label: "创业公司", tpl: "## 业务定位\n我们是一家___公司，核心产品/服务是___。\n\n## 当前阶段目标\n- 完成产品 MVP 并上线\n- 获取首批 100 个种子用户\n- 验证产品-市场匹配度\n\n## 工作策略\n- 产品优先：先打磨核心功能，再扩展\n- 精益运营：小规模验证后再投入推广资源\n- 数据驱动：关注用户留存率和活跃度\n\n## 主动运营要求\n负责人需持续推进：产品开发进度跟踪、市场调研执行、用户反馈收集与分析、团队任务协调。每个复盘周期应有可交付成果。" },
+                    { label: "内容运营", tpl: "## 业务定位\n面向___领域的内容创作与分发平台/账号。\n\n## 当前阶段目标\n- 建立稳定的内容生产流程（每周___篇）\n- 核心平台粉丝/订阅达到___\n- 形成可复制的爆款内容方法论\n\n## 工作策略\n- 选题驱动：每周策划会确定选题方向\n- 数据复盘：分析每篇内容的阅读/互动数据\n- 持续迭代：根据数据调整内容策略\n\n## 主动运营要求\n负责人需持续推进：选题策划与分配、内容质量把控、发布排期管理、数据复盘与策略调整。确保内容产出不中断。" },
+                    { label: "软件项目", tpl: "## 项目定位\n为___开发的___系统/应用。\n\n## 当前阶段目标\n- 完成___模块的开发与测试\n- 交付可演示的版本给___\n- 技术文档同步更新\n\n## 工作策略\n- 迭代开发：按优先级排列功能，每轮迭代2周\n- 质量保障：代码审查 + 自动化测试覆盖\n- 文档先行：关键架构决策必须文档化\n\n## 主动运营要求\n负责人需持续推进：任务拆解与分配、代码审查、进度跟踪、阻塞问题排除、与需求方沟通确认。" },
+                    { label: "研究课题", tpl: "## 课题方向\n研究___领域的___问题。\n\n## 当前阶段目标\n- 完成文献调研，形成研究综述\n- 确定研究方案和实验设计\n- 产出阶段性研究报告\n\n## 工作策略\n- 文献先行：系统梳理相关领域进展\n- 实验验证：设计对照实验验证假设\n- 定期交流：团队内部周会分享进展\n\n## 主动运营要求\n负责人需持续推进：文献调研分配、研究方案讨论、实验进度追踪、成果整理与汇报。" },
+                    { label: "电商运营", tpl: "## 业务定位\n面向___的___品类电商。\n\n## 当前阶段目标\n- 完成店铺搭建和首批___个 SKU 上架\n- 月销售额达到___\n- 建立稳定的供应链和客服流程\n\n## 工作策略\n- 选品驱动：通过市场分析确定主推品类\n- 流量获取：___平台引流 + 内容营销\n- 复购优先：客户满意度和复购率是核心指标\n\n## 主动运营要求\n负责人需持续推进：选品调研、供应链管理、营销活动策划执行、客户反馈处理、数据分析与策略调整。确保日常运营不中断。" },
+                  ].map((tpl) => (
+                    <button
+                      key={tpl.label}
+                      className="btnSmall"
+                      style={{ fontSize: 10, padding: "2px 7px" }}
+                      onClick={() => {
+                        if ((currentOrg.core_business || "").trim() && !confirm("将覆盖当前内容，确认？")) return;
+                        setCurrentOrg({ ...currentOrg, core_business: tpl.tpl });
+                      }}
+                    >
+                      {tpl.label}
+                    </button>
+                  ))}
+                </div>
+                <textarea
                   className="input"
-                  style={{ width: "100%", fontSize: 12 }}
-                  placeholder="例如：董事长、产品负责人、甲方"
-                  value={currentOrg.user_persona?.title || ""}
-                  onChange={(e) => setCurrentOrg({
-                    ...currentOrg,
-                    user_persona: { ...currentOrg.user_persona, title: e.target.value, display_name: currentOrg.user_persona?.display_name || "", description: currentOrg.user_persona?.description || "" },
-                  })}
+                  style={{ width: "100%", fontSize: 11, minHeight: 120, resize: "vertical", lineHeight: 1.6, fontFamily: "inherit" }}
+                  placeholder={"填写或选择模板后编辑。\n\n组织启动后，顶层节点将根据此内容自动制定策略、分配任务、持续推进。"}
+                  value={currentOrg.core_business || ""}
+                  onChange={(e) => setCurrentOrg({ ...currentOrg, core_business: e.target.value })}
                 />
+                {(currentOrg.core_business || "").trim() && (
+                  <div style={{ fontSize: 9, color: "var(--ok)", marginTop: 4 }}>
+                    启动组织后，顶层负责人将自动接收任务书并开始自主运营
+                  </div>
+                )}
               </div>
-              <div>
-                <label style={{ fontSize: 10, color: "var(--muted)", display: "block", marginBottom: 2 }}>显示名称（可选）</label>
-                <input
-                  className="input"
-                  style={{ width: "100%", fontSize: 12 }}
-                  placeholder="留空则使用头衔"
-                  value={currentOrg.user_persona?.display_name || ""}
-                  onChange={(e) => setCurrentOrg({
-                    ...currentOrg,
-                    user_persona: { ...currentOrg.user_persona, title: currentOrg.user_persona?.title || "负责人", display_name: e.target.value, description: currentOrg.user_persona?.description || "" },
-                  })}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: 10, color: "var(--muted)", display: "block", marginBottom: 2 }}>简介</label>
-                <input
-                  className="input"
-                  style={{ width: "100%", fontSize: 12 }}
-                  placeholder="例如：公司最高决策者"
-                  value={currentOrg.user_persona?.description || ""}
-                  onChange={(e) => setCurrentOrg({
-                    ...currentOrg,
-                    user_persona: { ...currentOrg.user_persona, title: currentOrg.user_persona?.title || "负责人", display_name: currentOrg.user_persona?.display_name || "", description: e.target.value },
-                  })}
-                />
-              </div>
-            </div>
+            )}
           </div>
 
-          <div className="card" style={{ padding: 10 }}>
-            <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>快捷预设</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-              {[
-                { title: "董事长", desc: "公司最高决策者" },
-                { title: "产品负责人", desc: "项目需求方与最终验收人" },
-                { title: "出品人", desc: "内容方向决策者" },
-                { title: "投资人", desc: "外部投资方" },
-                { title: "甲方", desc: "项目委托方" },
-                { title: "课题负责人", desc: "研究课题主持人" },
-              ].map((preset) => (
+          {/* ── 用户身份 ── */}
+          <div className="card" style={{ padding: 10, marginBottom: 10 }}>
+            <div
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
+              onClick={() => setPersonaCollapsed(!personaCollapsed)}
+            >
+              <div style={{ fontWeight: 600, fontSize: 12 }}>
+                用户身份
+                {currentOrg.user_persona?.title && (
+                  <span style={{ fontWeight: 400, fontSize: 10, color: "var(--muted)", marginLeft: 6 }}>
+                    {currentOrg.user_persona.display_name || currentOrg.user_persona.title}
+                  </span>
+                )}
+              </div>
+              <span style={{ fontSize: 10, color: "var(--muted)" }}>{personaCollapsed ? "▸" : "▾"}</span>
+            </div>
+            {!personaCollapsed && (
+              <div style={{ marginTop: 6 }}>
+                <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 6, lineHeight: 1.5 }}>
+                  你在本组织中的角色。节点会以此身份认知你。
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 8 }}>
+                  {[
+                    { title: "董事长", desc: "组织最高决策者" },
+                    { title: "产品负责人", desc: "项目需求方与最终验收人" },
+                    { title: "出品人", desc: "内容方向决策者" },
+                    { title: "投资人", desc: "外部投资方" },
+                    { title: "甲方", desc: "项目委托方" },
+                    { title: "课题负责人", desc: "研究课题主持人" },
+                  ].map((preset) => (
+                    <button
+                      key={preset.title}
+                      className="btnSmall"
+                      style={{
+                        fontSize: 10, padding: "2px 7px",
+                        background: currentOrg.user_persona?.title === preset.title ? "var(--primary)" : undefined,
+                        color: currentOrg.user_persona?.title === preset.title ? "#fff" : undefined,
+                      }}
+                      onClick={() => setCurrentOrg({
+                        ...currentOrg,
+                        user_persona: { title: preset.title, display_name: preset.title, description: preset.desc },
+                      })}
+                    >
+                      {preset.title}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 9, color: "var(--muted)", display: "block", marginBottom: 1 }}>头衔</label>
+                      <input
+                        className="input"
+                        style={{ width: "100%", fontSize: 11 }}
+                        placeholder="董事长"
+                        value={currentOrg.user_persona?.title || ""}
+                        onChange={(e) => setCurrentOrg({
+                          ...currentOrg,
+                          user_persona: { ...currentOrg.user_persona, title: e.target.value, display_name: currentOrg.user_persona?.display_name || "", description: currentOrg.user_persona?.description || "" },
+                        })}
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 9, color: "var(--muted)", display: "block", marginBottom: 1 }}>显示名</label>
+                      <input
+                        className="input"
+                        style={{ width: "100%", fontSize: 11 }}
+                        placeholder="留空用头衔"
+                        value={currentOrg.user_persona?.display_name || ""}
+                        onChange={(e) => setCurrentOrg({
+                          ...currentOrg,
+                          user_persona: { ...currentOrg.user_persona, title: currentOrg.user_persona?.title || "负责人", display_name: e.target.value, description: currentOrg.user_persona?.description || "" },
+                        })}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 9, color: "var(--muted)", display: "block", marginBottom: 1 }}>简介</label>
+                    <input
+                      className="input"
+                      style={{ width: "100%", fontSize: 11 }}
+                      placeholder="例如：组织最高决策者"
+                      value={currentOrg.user_persona?.description || ""}
+                      onChange={(e) => setCurrentOrg({
+                        ...currentOrg,
+                        user_persona: { ...currentOrg.user_persona, title: currentOrg.user_persona?.title || "负责人", display_name: currentOrg.user_persona?.display_name || "", description: e.target.value },
+                      })}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Blackboard ── */}
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>组织黑板</div>
+              <button
+                className="btnSmall"
+                style={{ fontSize: 10, padding: "2px 8px" }}
+                onClick={() => fetchBlackboard(currentOrg.id, bbScope)}
+                disabled={bbLoading}
+              >
+                {bbLoading ? "..." : "刷新"}
+              </button>
+            </div>
+
+            <div style={{ display: "flex", gap: 2, marginBottom: 8 }}>
+              {([
+                { key: "all", label: "全部" },
+                { key: "org", label: "组织级" },
+                { key: "department", label: "部门级" },
+                { key: "node", label: "节点级" },
+              ] as const).map((s) => (
                 <button
-                  key={preset.title}
+                  key={s.key}
                   className="btnSmall"
-                  style={{ fontSize: 11, padding: "3px 8px" }}
-                  onClick={() => setCurrentOrg({
-                    ...currentOrg,
-                    user_persona: { title: preset.title, display_name: preset.title, description: preset.desc },
-                  })}
+                  style={{
+                    fontSize: 10, padding: "2px 6px",
+                    fontWeight: bbScope === s.key ? 600 : 400,
+                    background: bbScope === s.key ? "var(--primary)" : "transparent",
+                    color: bbScope === s.key ? "#fff" : "var(--muted)",
+                    borderRadius: 4,
+                  }}
+                  onClick={() => setBbScope(s.key)}
                 >
-                  {preset.title}
+                  {s.label}
                 </button>
               ))}
             </div>
+
+            {bbEntries.length === 0 ? (
+              <div style={{
+                fontSize: 11, color: "var(--muted)", padding: "16px 10px",
+                textAlign: "center", border: "1px dashed var(--line)", borderRadius: 8,
+              }}>
+                {bbLoading ? "加载中..." : "暂无记录"}
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {bbEntries.map((entry: any) => {
+                  const scopeLabel = entry.scope === "org" ? "组织" : entry.scope === "department" ? entry.scope_owner : entry.source_node || "节点";
+                  const typeColors: Record<string, string> = {
+                    fact: "#3b82f6", decision: "#f59e0b", lesson: "#10b981",
+                    progress: "#8b5cf6", todo: "#ef4444",
+                  };
+                  const typeLabels: Record<string, string> = {
+                    fact: "事实", decision: "决策", lesson: "经验",
+                    progress: "进展", todo: "待办",
+                  };
+                  return (
+                    <div
+                      key={entry.id}
+                      style={{
+                        border: "1px solid var(--line)", borderRadius: 6,
+                        padding: "6px 8px", background: "var(--bg-card, #fff)",
+                        fontSize: 11,
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                          <span style={{
+                            fontSize: 9, padding: "1px 5px", borderRadius: 3,
+                            background: (typeColors[entry.memory_type] || "#6b7280") + "18",
+                            color: typeColors[entry.memory_type] || "#6b7280",
+                            fontWeight: 600,
+                          }}>
+                            {typeLabels[entry.memory_type] || entry.memory_type}
+                          </span>
+                          <span style={{ fontSize: 9, color: "var(--muted)" }}>{scopeLabel}</span>
+                        </div>
+                        <button
+                          className="btnSmall"
+                          style={{ fontSize: 9, padding: "0 4px", color: "var(--muted)" }}
+                          title="删除此条"
+                          onClick={async () => {
+                            try {
+                              await safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/memory/${entry.id}`, { method: "DELETE" });
+                              setBbEntries((prev) => prev.filter((e: any) => e.id !== entry.id));
+                            } catch { /* ignore */ }
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <div style={{ lineHeight: 1.5, wordBreak: "break-word" }}>
+                        {entry.content}
+                      </div>
+                      {entry.tags && entry.tags.length > 0 && (
+                        <div style={{ marginTop: 3, display: "flex", gap: 3, flexWrap: "wrap" }}>
+                          {entry.tags.map((t: string) => (
+                            <span key={t} style={{
+                              fontSize: 9, padding: "0 4px", borderRadius: 3,
+                              background: "#f3f4f6", color: "#6b7280",
+                            }}>#{t}</span>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 3 }}>
+                        {entry.source_node && <span>来自 {entry.source_node} · </span>}
+                        {entry.created_at ? new Date(entry.created_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

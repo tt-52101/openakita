@@ -105,7 +105,28 @@ class OrgIdentity:
                      f"你在「{org.name}」中担任 **{node.role_title}**（{node.department}）。\n"
                      f"{identity.role}")
 
-        parts.append(f"## 公司架构概览\n{org_chart}\n"
+        if org.core_business:
+            is_root = (node.level == 0 or not parent)
+            persona_label = org.user_persona.label if org.user_persona else "负责人"
+            biz_section = f"## 核心业务\n{org.core_business}"
+            if is_root:
+                biz_section += (
+                    f"\n\n### 连续工作职责\n"
+                    f"你是本组织的最高负责人，对上述核心业务负有**持续推进**责任：\n"
+                    f"- 自主制定工作策略和阶段目标，不需要等{persona_label}逐步下达指令\n"
+                    f"- 主动拆解任务、委派下属、跟进进度、复盘调整\n"
+                    f"- 遇到阻塞或重大决策时记录到黑板，但不要停下来等待批准——先执行最佳判断\n"
+                    f"- {persona_label}的指令是方向调整和补充，日常工作由你全权负责\n"
+                    f"- 每次被激活时，先回顾黑板上的进展，然后推进下一步工作"
+                )
+            else:
+                biz_section += (
+                    "\n\n以上是组织的核心业务方向，你的工作应围绕此展开，"
+                    "主动配合上级的任务安排，完成后及时汇报并询问下一步工作。"
+                )
+            parts.append(biz_section)
+
+        parts.append(f"## 组织架构概览\n{org_chart}\n"
                      f"需要详情时用 org_get_org_chart 查看完整架构，不确定找谁时用 org_find_colleague 搜索。")
 
         rel_parts = []
@@ -133,7 +154,7 @@ class OrgIdentity:
 
         parts.append(
             "## 制度与流程\n"
-            "公司有完整的制度体系。当你不确定某个流程如何执行时：\n"
+            "组织有完整的制度体系。当你不确定某个流程如何执行时：\n"
             "1. 先用 org_search_policy 搜索相关制度\n"
             "2. 用 org_read_policy 阅读具体制度内容\n"
             "3. 按制度规定执行\n"

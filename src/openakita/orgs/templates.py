@@ -22,6 +22,7 @@ STARTUP_COMPANY: dict = {
     "icon": "🏢",
     "tags": ["company", "startup"],
     "user_persona": {"title": "董事长", "display_name": "董事长", "description": "公司最高决策者"},
+    "core_business": "",
     "heartbeat_enabled": False,
     "heartbeat_interval_s": 1800,
     "heartbeat_prompt": "审视公司当前运营状态，识别紧急事项和阻塞，决定是否需要分配新任务或调整优先级。",

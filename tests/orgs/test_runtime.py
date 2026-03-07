@@ -167,6 +167,105 @@ class TestSendCommand:
             await runtime.shutdown()
 
 
+class TestAutoKickoff:
+    """Tests for auto-kickoff when core_business is set (v1.3)."""
+
+    async def test_start_org_with_core_business_triggers_kickoff(
+        self, runtime: OrgRuntime, org_manager: OrgManager,
+    ):
+        with patch("openakita.orgs.templates.ensure_builtin_templates"):
+            await runtime.start()
+        try:
+            org_data = make_org(name="自动启动测试").to_dict()
+            org_data["core_business"] = "做一个电商平台"
+            org = org_manager.create(org_data)
+
+            with patch.object(runtime, "_auto_kickoff", new_callable=AsyncMock) as mock_kickoff:
+                await runtime.start_org(org.id)
+
+                await asyncio.sleep(0.1)
+                mock_kickoff.assert_called_once()
+                call_org = mock_kickoff.call_args[0][0]
+                assert call_org.core_business == "做一个电商平台"
+        finally:
+            await runtime.shutdown()
+
+    async def test_start_org_without_core_business_no_kickoff(
+        self, runtime: OrgRuntime, org_manager: OrgManager,
+    ):
+        with patch("openakita.orgs.templates.ensure_builtin_templates"):
+            await runtime.start()
+        try:
+            org_data = make_org(name="无业务测试").to_dict()
+            org_data["core_business"] = ""
+            org = org_manager.create(org_data)
+
+            with patch.object(runtime, "_auto_kickoff", new_callable=AsyncMock) as mock_kickoff:
+                await runtime.start_org(org.id)
+                await asyncio.sleep(0.1)
+                mock_kickoff.assert_not_called()
+        finally:
+            await runtime.shutdown()
+
+    async def test_auto_kickoff_prompt_uses_dynamic_role_title(
+        self, runtime: OrgRuntime, org_manager: OrgManager,
+    ):
+        with patch("openakita.orgs.templates.ensure_builtin_templates"):
+            await runtime.start()
+        try:
+            org_data = make_org(name="主编团队").to_dict()
+            org_data["core_business"] = "内容运营"
+            org_data["nodes"][0]["role_title"] = "主编"
+            org = org_manager.create(org_data)
+
+            captured_prompt = None
+
+            async def capture_activate(org_obj, node, prompt):
+                nonlocal captured_prompt
+                captured_prompt = prompt
+                return {"result": "ok"}
+
+            with patch.object(runtime, "_activate_and_run", side_effect=capture_activate):
+                await runtime.start_org(org.id)
+                await asyncio.sleep(0.2)
+
+            assert captured_prompt is not None
+            assert "主编" in captured_prompt
+            assert "经营任务书" in captured_prompt
+            assert "内容运营" in captured_prompt
+        finally:
+            await runtime.shutdown()
+
+    async def test_auto_kickoff_prompt_uses_persona_label(
+        self, runtime: OrgRuntime, org_manager: OrgManager,
+    ):
+        with patch("openakita.orgs.templates.ensure_builtin_templates"):
+            await runtime.start()
+        try:
+            from openakita.orgs.models import UserPersona
+            org_data = make_org(name="投资项目").to_dict()
+            org_data["core_business"] = "AI 研究"
+            org_data["user_persona"] = {"title": "投资人", "display_name": "张总", "description": ""}
+            org = org_manager.create(org_data)
+
+            captured_prompt = None
+
+            async def capture_activate(org_obj, node, prompt):
+                nonlocal captured_prompt
+                captured_prompt = prompt
+                return {"result": "ok"}
+
+            with patch.object(runtime, "_activate_and_run", side_effect=capture_activate):
+                await runtime.start_org(org.id)
+                await asyncio.sleep(0.2)
+
+            assert captured_prompt is not None
+            assert "张总" in captured_prompt
+            assert "张总委托你全权负责" in captured_prompt
+        finally:
+            await runtime.shutdown()
+
+
 class TestStateTransitions:
     async def test_pause_and_resume(self, runtime: OrgRuntime, org_manager: OrgManager):
         with patch("openakita.orgs.templates.ensure_builtin_templates"):

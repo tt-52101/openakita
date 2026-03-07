@@ -370,3 +370,37 @@ class TestUserPersona:
         org = Organization.from_dict(d)
         assert isinstance(org.user_persona, UserPersona)
         assert org.user_persona.title == "负责人"
+
+
+# ---------------------------------------------------------------------------
+# core_business field (v1.3)
+# ---------------------------------------------------------------------------
+
+
+class TestCoreBusiness:
+    def test_default_empty(self):
+        org = Organization()
+        assert org.core_business == ""
+
+    def test_to_dict_includes_core_business(self):
+        org = Organization(core_business="做一个 SaaS 产品")
+        d = org.to_dict()
+        assert d["core_business"] == "做一个 SaaS 产品"
+
+    def test_from_dict_with_core_business(self):
+        d = {"id": "org_biz", "name": "业务组织", "core_business": "电商运营"}
+        org = Organization.from_dict(d)
+        assert org.core_business == "电商运营"
+
+    def test_from_dict_without_core_business(self):
+        d = {"id": "org_no_biz", "name": "无业务"}
+        org = Organization.from_dict(d)
+        assert org.core_business == ""
+
+    def test_roundtrip_with_markdown(self):
+        biz = "## 目标\n- 完成 MVP\n\n## 策略\n- 精益开发"
+        org = Organization(core_business=biz, user_persona=UserPersona(title="产品经理"))
+        d = org.to_dict()
+        restored = Organization.from_dict(d)
+        assert restored.core_business == biz
+        assert restored.user_persona.title == "产品经理"

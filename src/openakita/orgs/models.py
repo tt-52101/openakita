@@ -348,6 +348,9 @@ class Organization:
     # User identity within the organization
     user_persona: UserPersona = field(default_factory=UserPersona)
 
+    # Core business mission — drives proactive operations
+    core_business: str = ""
+
     # Token budget (reserved, not enforced initially)
     token_budget: int | None = None
     token_budget_period: str | None = None
@@ -394,6 +397,7 @@ class Organization:
             "total_messages_exchanged": self.total_messages_exchanged,
             "total_tokens_used": self.total_tokens_used,
             "user_persona": self.user_persona.to_dict(),
+            "core_business": self.core_business,
             "token_budget": self.token_budget,
             "token_budget_period": self.token_budget_period,
         }

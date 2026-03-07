@@ -169,7 +169,7 @@ ORG_NODE_TOOLS: list[dict] = [
     # ── 制度流程 ──
     {
         "name": "org_list_policies",
-        "description": "列出所有公司制度和流程文件（返回索引）",
+        "description": "列出所有组织制度和流程文件（返回索引）",
         "input_schema": {"type": "object", "properties": {}},
     },
     {
