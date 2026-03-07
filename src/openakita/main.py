@@ -617,13 +617,6 @@ async def start_im_channels(agent_or_master):
     if settings.multi_agent_enabled:
         await _init_orchestrator()
 
-    # Desktop Chat per-session Agent pool (always initialized for concurrent streaming)
-    global _desktop_pool
-    from openakita.agents.factory import AgentFactory, AgentInstancePool
-    _desktop_pool = AgentInstancePool(AgentFactory(), idle_timeout=600)
-    await _desktop_pool.start()
-    logger.info("[Main] Desktop AgentInstancePool initialized (idle_timeout=600s)")
-
     # 注册启用的适配器
     adapters_started = []
 
@@ -1568,6 +1561,15 @@ def serve(
         if settings.multi_agent_enabled and _orchestrator is None:
             await _init_orchestrator()
             logger.info("[Main] Orchestrator created as fallback (no IM channels path)")
+
+        # Desktop Chat per-session Agent pool — 独立于 IM 通道，始终初始化
+        # （供 HTTP API /api/chat 并发会话隔离使用）
+        global _desktop_pool
+        if _desktop_pool is None:
+            from openakita.agents.factory import AgentFactory, AgentInstancePool
+            _desktop_pool = AgentInstancePool(AgentFactory(), idle_timeout=600)
+            await _desktop_pool.start()
+            logger.info("[Main] Desktop AgentInstancePool initialized (idle_timeout=600s)")
 
         # 注入 shutdown_event 到网关（供终极重启指令使用）
         if _message_gateway is not None:
