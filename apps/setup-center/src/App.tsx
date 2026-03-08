@@ -5347,6 +5347,64 @@ export function App() {
       } catch (e) { setError(String(e)); }
     }
 
+    // ── 系统运维区域 ──
+
+    const opsWs = workspaces.find(w => w.id === (currentWorkspaceId || "default"));
+    const opsWsPath = opsWs?.path || "";
+    const opsLogsPath = opsWsPath ? joinPath(opsWsPath, "logs") : "";
+    const opsIdentityPath = opsWsPath ? joinPath(opsWsPath, "identity") : "";
+
+    const opsPathRows: { label: string; path: string }[] = [
+      { label: t("adv.opsWorkspacePath"), path: opsWsPath },
+      { label: t("adv.opsLogsPath"), path: opsLogsPath },
+      { label: t("adv.opsIdentityPath"), path: opsIdentityPath },
+    ];
+
+    async function opsOpenFolder(p: string) {
+      if (!p) return;
+      try {
+        await invoke("show_item_in_folder", { path: p });
+      } catch {
+        try {
+          await invoke("open_file_with_default", { path: p });
+        } catch {
+          if (opsWsPath && opsWsPath !== p) {
+            try { await invoke("open_file_with_default", { path: opsWsPath }); } catch (e) { setError(String(e)); }
+          }
+        }
+      }
+    }
+
+    async function opsHandleBundleExport() {
+      if (!currentWorkspaceId) return;
+      try {
+        const ts = Math.floor(Date.now() / 1000);
+        const filename = `openakita-diagnostic-${ts}.zip`;
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const defaultDir = info?.homeDir ? joinPath(info.homeDir, "Downloads") : undefined;
+        const chosen = await save({
+          defaultPath: defaultDir ? joinPath(defaultDir, filename) : filename,
+          filters: [{ name: "ZIP Archive", extensions: ["zip"] }],
+        });
+        if (!chosen) return;
+        setBusy(t("adv.opsLogExporting"));
+        let sysInfoJson: string | undefined;
+        if (shouldUseHttpApi()) {
+          try {
+            const res = await safeFetch(`${httpApiBase()}/api/system-info`, { signal: AbortSignal.timeout(5_000) });
+            const data = await res.json();
+            sysInfoJson = JSON.stringify(data, null, 2);
+          } catch { /* best-effort */ }
+        }
+        const dest = await invoke<string>("export_diagnostic_bundle", {
+          workspaceId: currentWorkspaceId,
+          systemInfoJson: sysInfoJson ?? null,
+          destPath: chosen,
+        });
+        setNotice(t("adv.opsLogExportSuccess", { path: dest }));
+        await invoke("show_item_in_folder", { path: dest });
+      } catch (e) { setError(String(e)); } finally { setBusy(null); }
+    }
 
     async function exportEnv() {
       if (!currentWorkspaceId || !IS_TAURI) { if (!IS_TAURI) setError("Web 模式暂不支持导出 .env"); return; }
@@ -5613,6 +5671,46 @@ export function App() {
             </div>
         </div>
 
+        {/* ── 系统运维 ── */}
+        {IS_TAURI && (
+        <div className="card" style={{ marginTop: 12 }}>
+          {sectionHeader("ops", t("adv.opsTitle"))}
+          <div style={{ paddingLeft: 22 }}>
+            {/* 路径信息 */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 8, color: "var(--muted)" }}>{t("adv.opsPaths")}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: "6px 12px", alignItems: "center", fontSize: 13 }}>
+                {opsPathRows.map((row) => (
+                  <Fragment key={row.label}>
+                    <span style={{ fontWeight: 500, whiteSpace: "nowrap" }}>{row.label}</span>
+                    <span style={{ wordBreak: "break-all", color: "var(--muted)", fontSize: 12, fontFamily: "monospace" }}>{row.path || "—"}</span>
+                    <button className="btnSmall" onClick={() => opsOpenFolder(row.path)} disabled={!row.path}>{t("adv.opsOpenFolder")}</button>
+                  </Fragment>
+                ))}
+              </div>
+            </div>
+
+            {/* 环境变量管理 */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 8, color: "var(--muted)" }}>{t("adv.opsEnvManage")}</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="btnSmall" onClick={exportEnv} disabled={!!busy || !currentWorkspaceId}>{t("adv.opsEnvExport")}</button>
+                <button className="btnSmall" onClick={importEnv} disabled={!!busy || !currentWorkspaceId}>{t("adv.opsEnvImport")}</button>
+              </div>
+            </div>
+
+            {/* 诊断日志导出 */}
+            <div>
+              <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 4, color: "var(--muted)" }}>{t("adv.opsLogExport")}</div>
+              <div className="cardHint" style={{ marginBottom: 8 }}>{t("adv.opsLogExportDesc")}</div>
+              <button className="btnSmall" onClick={opsHandleBundleExport} disabled={!!busy || !currentWorkspaceId}>
+                {busy === t("adv.opsLogExporting") ? t("adv.opsLogExporting") : t("adv.opsLogExportBtn")}
+              </button>
+            </div>
+          </div>
+        </div>
+        )}
+
         {/* ── 平台连接（Agent Hub / Skill Store） ── */}
         <div className="card" style={{ marginTop: 12 }}>
           {sectionHeader("hub", t("adv.hubTitle"))}
@@ -5746,7 +5844,8 @@ export function App() {
         </div>
         )}
 
-        {/* ── .env 导出/导入（保留旧功能） ── */}
+        {/* ── .env 导出/导入（Web 模式保留，Tauri 模式在系统运维卡片中） ── */}
+        {!IS_TAURI && (
         <div className="card" style={{ marginTop: 12 }}>
           {sectionHeader("envio", t("adv.export").replace(" .env", "") + " / " + t("adv.import").replace(" .env", "") + " .env")}
             <div style={{ paddingLeft: 22 }}>
@@ -5756,6 +5855,7 @@ export function App() {
               </div>
             </div>
         </div>
+        )}
 
         {/* ── 数据备份与恢复 ── */}
         <div className="card" style={{ marginTop: 12 }}>
