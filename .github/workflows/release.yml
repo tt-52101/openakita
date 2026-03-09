@@ -889,14 +889,18 @@ jobs:
           IS_STABLE: ${{ needs.create_release.outputs.is_stable }}
         run: |
           LATEST_FLAG=""
+          PRERELEASE_FLAG=""
           if [ "$IS_STABLE" = "true" ]; then
             LATEST_FLAG="--latest"
+            PRERELEASE_FLAG="--prerelease=false"
           else
             LATEST_FLAG="--latest=false"
+            PRERELEASE_FLAG="--prerelease"
           fi
           gh release edit "${{ env.RELEASE_TAG }}" \
             --repo "${{ github.repository }}" \
             --draft=false \
+            ${PRERELEASE_FLAG} \
             ${LATEST_FLAG}
 
       - name: Generate release manifest
