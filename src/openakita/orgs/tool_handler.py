@@ -143,16 +143,29 @@ class OrgToolHandler:
         parent_depth = self._runtime._cascade_depth.get(f"{org_id}:{node_id}", 0)
         metadata = {"_cascade_depth": parent_depth + 1}
 
+        raw_type = args.get("msg_type", "question")
+        try:
+            msg_type = MsgType(raw_type)
+        except ValueError:
+            msg_type = MsgType.QUESTION
+            logger.warning(f"[OrgToolHandler] Invalid msg_type '{raw_type}', falling back to 'question'")
+
         msg = OrgMessage(
             org_id=org_id,
             from_node=node_id,
             to_node=args["to_node"],
-            msg_type=MsgType(args.get("msg_type", "question")),
+            msg_type=msg_type,
             content=args["content"],
             priority=args.get("priority", 0),
             metadata=metadata,
         )
         ok = await messenger.send(msg)
+        if ok:
+            await self._runtime._broadcast_ws("org:message", {
+                "org_id": org_id, "from_node": node_id, "to_node": args["to_node"],
+                "msg_type": args.get("msg_type", "question"),
+                "content": args["content"][:120],
+            })
         return f"消息已发送给 {args['to_node']}" if ok else "发送失败"
 
     async def _handle_org_reply_message(
@@ -216,6 +229,10 @@ class OrgToolHandler:
             "task_assigned", node_id,
             {"to": to_node, "task": args["task"][:100], "chain_id": chain_id},
         )
+        await self._runtime._broadcast_ws("org:task_delegated", {
+            "org_id": org_id, "from_node": node_id, "to_node": to_node,
+            "task": args["task"][:120], "chain_id": chain_id,
+        })
         return f"任务已分配给 {to_node}（chain: {chain_id[:12]}）: {args['task'][:50]}"
 
     async def _handle_org_escalate(
@@ -232,6 +249,11 @@ class OrgToolHandler:
             metadata={"_cascade_depth": parent_depth + 1},
         )
         if result:
+            await self._runtime._broadcast_ws("org:escalation", {
+                "org_id": org_id, "from_node": node_id,
+                "to_node": result.to_node if hasattr(result, "to_node") else "",
+                "content": args["content"][:120],
+            })
             return f"已上报给上级"
         return "无法上报（没有上级节点）"
 
@@ -388,7 +410,12 @@ class OrgToolHandler:
         bb = self._runtime.get_blackboard(org_id)
         if not bb:
             return "黑板不可用"
-        mt = MemoryType(args.get("memory_type", "fact"))
+        raw_mt = args.get("memory_type", "fact")
+        try:
+            mt = MemoryType(raw_mt)
+        except ValueError:
+            mt = MemoryType.FACT
+            logger.warning(f"[OrgToolHandler] Invalid memory_type '{raw_mt}', falling back to 'fact'")
         entry = bb.write_org(
             content=args["content"],
             source_node=node_id,
@@ -398,6 +425,11 @@ class OrgToolHandler:
         )
         if entry is None:
             return f"黑板已有相似内容，跳过重复写入: {args['content'][:50]}"
+        await self._runtime._broadcast_ws("org:blackboard_update", {
+            "org_id": org_id, "scope": "org", "node_id": node_id,
+            "memory_type": args.get("memory_type", "fact"),
+            "content": args["content"][:120],
+        })
         return f"已写入组织黑板: {args['content'][:50]}"
 
     async def _handle_org_read_dept_memory(
@@ -427,7 +459,11 @@ class OrgToolHandler:
         dept = node.department if node else ""
         if not dept:
             return "你未分配部门"
-        mt = MemoryType(args.get("memory_type", "fact"))
+        raw_mt = args.get("memory_type", "fact")
+        try:
+            mt = MemoryType(raw_mt)
+        except ValueError:
+            mt = MemoryType.FACT
         entry = bb.write_department(
             dept, args["content"], node_id,
             memory_type=mt,
@@ -435,7 +471,12 @@ class OrgToolHandler:
             importance=args.get("importance", 0.5),
         )
         if entry is None:
-            return f"部门记忆已有相似内容，跳过重复写入"
+            return "部门记忆已有相似内容，跳过重复写入"
+        await self._runtime._broadcast_ws("org:blackboard_update", {
+            "org_id": org_id, "scope": "department", "department": dept,
+            "node_id": node_id, "memory_type": args.get("memory_type", "fact"),
+            "content": args["content"][:120],
+        })
         return f"已写入 {dept} 部门记忆"
 
     # ------------------------------------------------------------------
@@ -630,6 +671,10 @@ class OrgToolHandler:
         )
 
         if ok:
+            await self._runtime._broadcast_ws("org:task_delivered", {
+                "org_id": org_id, "from_node": node_id, "to_node": to_node,
+                "chain_id": chain_id, "summary": summary[:120],
+            })
             return f"交付物已提交给 {to_node}，等待验收。"
         return "提交失败"
 
@@ -667,6 +712,10 @@ class OrgToolHandler:
             "task_accepted", node_id,
             {"from": from_node, "chain_id": chain_id},
         )
+        await self._runtime._broadcast_ws("org:task_accepted", {
+            "org_id": org_id, "from_node": from_node, "accepted_by": node_id,
+            "chain_id": chain_id, "feedback": feedback[:120],
+        })
 
         bb = self._runtime.get_blackboard(org_id)
         if bb:
@@ -710,6 +759,10 @@ class OrgToolHandler:
             "task_rejected", node_id,
             {"from": from_node, "chain_id": chain_id, "reason": reason[:100]},
         )
+        await self._runtime._broadcast_ws("org:task_rejected", {
+            "org_id": org_id, "from_node": from_node, "rejected_by": node_id,
+            "chain_id": chain_id, "reason": reason[:120],
+        })
 
         return f"已打回 {from_node} 的交付物，原因：{reason[:50]}"
 

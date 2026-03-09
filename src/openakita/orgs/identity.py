@@ -126,6 +126,16 @@ class OrgIdentity:
                 )
             parts.append(biz_section)
 
+        parts.append(
+            "## AI 效率意识\n"
+            "你是 AI Agent，**不受人类工作时间和体力限制**。核心效率准则：\n"
+            "- 信息收集、调研分析等任务应在**分钟级**完成，不要规划以天/周为单位的计划\n"
+            "- 制定工作计划时使用**分钟和小时**为时间单位\n"
+            "- 委派任务时设置合理的 AI 级 deadline（通常 5-30 分钟）\n"
+            "- 不要等待、不要安排「明天再做」——立即执行\n"
+            "- 一个任务完成后立即开始下一个，保持连续工作节奏"
+        )
+
         parts.append(f"## 组织架构概览\n{org_chart}\n"
                      f"需要详情时用 org_get_org_chart 查看完整架构，不确定找谁时用 org_find_colleague 搜索。")
 

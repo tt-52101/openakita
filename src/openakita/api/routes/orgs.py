@@ -400,6 +400,71 @@ async def get_node_status(request: Request, org_id: str, node_id: str):
         "frozen_at": node.frozen_at,
     }
 
+@router.get("/{org_id}/nodes/{node_id}/thinking")
+async def get_node_thinking(request: Request, org_id: str, node_id: str):
+    """Get a node's recent thinking process: events, messages, and tool calls."""
+    rt = _get_runtime(request)
+    org = rt.get_org(org_id)
+    if not org:
+        raise HTTPException(404, "Organization not found")
+    node = org.get_node(node_id)
+    if not node:
+        raise HTTPException(404, f"Node not found: {node_id}")
+
+    limit = _safe_int(request.query_params.get("limit"), 30)
+    es = rt.get_event_store(org_id)
+
+    events = es.query(actor=node_id, limit=limit) if es else []
+
+    org_dir = rt._manager._org_dir(org_id)
+    comm_log = org_dir / "logs" / "communications.jsonl"
+    messages: list[dict] = []
+    if comm_log.is_file():
+        import json as _json
+        try:
+            lines = comm_log.read_text(encoding="utf-8").strip().split("\n")
+            for line in reversed(lines):
+                if not line.strip():
+                    continue
+                try:
+                    msg = _json.loads(line)
+                except Exception:
+                    continue
+                if msg.get("from_node") == node_id or msg.get("to_node") == node_id:
+                    messages.append(msg)
+                    if len(messages) >= limit:
+                        break
+                    continue
+        except Exception:
+            pass
+
+    timeline: list[dict] = []
+    for evt in events:
+        timeline.append({
+            "type": "event",
+            "timestamp": evt.get("timestamp", ""),
+            "event_type": evt.get("event_type", ""),
+            "data": evt.get("data", {}),
+        })
+    for msg in messages:
+        timeline.append({
+            "type": "message",
+            "timestamp": msg.get("timestamp", msg.get("created_at", "")),
+            "direction": "out" if msg.get("from_node") == node_id else "in",
+            "peer": msg.get("to_node") if msg.get("from_node") == node_id else msg.get("from_node"),
+            "msg_type": msg.get("msg_type", ""),
+            "content": msg.get("content", "")[:500],
+        })
+    timeline.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+
+    return {
+        "node_id": node_id,
+        "role_title": node.role_title,
+        "status": node.status.value,
+        "timeline": timeline[:limit],
+    }
+
+
 @router.get("/{org_id}/nodes/{node_id}/prompt-preview")
 async def preview_node_prompt(request: Request, org_id: str, node_id: str):
     """Preview the assembled prompt for a node (without creating an agent)."""
@@ -1020,7 +1085,9 @@ async def replay_events(request: Request, org_id: str):
 
 @router.get("/{org_id}/stats")
 async def get_org_stats(request: Request, org_id: str):
-    """Get real-time organization statistics."""
+    """Get real-time organization statistics with per-node runtime data."""
+    import time as _time
+
     rt = _get_runtime(request)
     org = rt.get_org(org_id)
     if not org:
@@ -1040,10 +1107,87 @@ async def get_org_stats(request: Request, org_id: str):
         for n in org.nodes:
             pending_messages += messenger.get_pending_count(n.id)
 
+    now_mono = _time.monotonic()
+    per_node: list[dict] = []
+    anomalies: list[dict] = []
+    agent_cache = getattr(rt, "_agent_cache", None) or {}
+    for n in org.nodes:
+        cache_key = f"{org_id}:{n.id}"
+        cached = agent_cache.get(cache_key) if isinstance(agent_cache, dict) else None
+        idle_secs = None
+        if cached:
+            try:
+                last = cached.last_used
+                if isinstance(last, (int, float)) and last > 0:
+                    idle_secs = now_mono - last
+            except Exception:
+                pass
+        node_pending = messenger.get_pending_count(n.id) if messenger else 0
+        entry = {
+            "id": n.id,
+            "role_title": n.role_title,
+            "department": n.department,
+            "status": n.status.value,
+            "pending_messages": node_pending,
+            "idle_seconds": round(idle_secs) if idle_secs is not None else None,
+            "current_task": getattr(n, "_current_task_desc", None),
+            "is_clone": n.is_clone,
+            "frozen": n.frozen_by is not None,
+        }
+        per_node.append(entry)
+
+        if n.status.value == "error":
+            anomalies.append({"node_id": n.id, "role_title": n.role_title, "type": "error",
+                              "message": "节点处于错误状态"})
+        elif n.status.value == "busy" and idle_secs is not None and idle_secs > 600:
+            anomalies.append({"node_id": n.id, "role_title": n.role_title, "type": "stuck",
+                              "message": f"节点标记为忙碌但已 {round(idle_secs / 60)} 分钟无活动"})
+        elif n.status.value == "idle" and idle_secs is not None and idle_secs > 300 and not n.is_clone:
+            anomalies.append({"node_id": n.id, "role_title": n.role_title, "type": "long_idle",
+                              "message": f"空闲超过 {round(idle_secs / 60)} 分钟"})
+        if node_pending > 5:
+            anomalies.append({"node_id": n.id, "role_title": n.role_title, "type": "backlog",
+                              "message": f"待处理消息积压 {node_pending} 条"})
+
+    bb = rt.get_blackboard(org_id)
+    recent_bb: list[dict] = []
+    if bb:
+        try:
+            entries = bb.read_org(limit=5)
+            for e in entries:
+                recent_bb.append({
+                    "content": (e.content[:120] + "…") if len(e.content) > 120 else e.content,
+                    "source_node": e.source_node,
+                    "memory_type": e.memory_type.value if hasattr(e.memory_type, "value") else str(e.memory_type),
+                    "timestamp": e.created_at,
+                    "tags": e.tags[:3] if e.tags else [],
+                })
+        except Exception:
+            pass
+
+    uptime_s = None
+    if org.created_at:
+        try:
+            from datetime import datetime, timezone
+            start = datetime.fromisoformat(org.created_at.replace("Z", "+00:00"))
+            uptime_s = round((datetime.now(timezone.utc) - start).total_seconds())
+        except Exception:
+            pass
+
+    health = "healthy"
+    if any(a["type"] == "error" for a in anomalies):
+        health = "critical"
+    elif any(a["type"] == "stuck" for a in anomalies):
+        health = "warning"
+    elif len(anomalies) > 0:
+        health = "attention"
+
     return {
         "org_id": org.id,
         "name": org.name,
         "status": org.status.value,
+        "health": health,
+        "uptime_s": uptime_s,
         "node_count": len(org.nodes),
         "edge_count": len(org.edges),
         "node_stats": node_stats,
@@ -1054,6 +1198,9 @@ async def get_org_stats(request: Request, org_id: str):
         "unread_inbox": inbox.unread_count(org_id) if inbox else 0,
         "pending_approvals": inbox.pending_approval_count(org_id) if inbox else 0,
         "pending_scaling_requests": len(scaler.get_pending_requests(org_id)),
+        "per_node": per_node,
+        "anomalies": anomalies,
+        "recent_blackboard": recent_bb,
     }
 
 

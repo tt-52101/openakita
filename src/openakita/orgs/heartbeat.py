@@ -28,6 +28,30 @@ class OrgHeartbeat:
         self._runtime = runtime
         self._heartbeat_tasks: dict[str, asyncio.Task] = {}
         self._standup_tasks: dict[str, asyncio.Task] = {}
+        self._last_activity: dict[str, float] = {}
+        self._tasks_since_review: dict[str, int] = {}
+
+    def record_activity(self, org_id: str) -> None:
+        """Record that an org had activity (called from runtime on task events)."""
+        self._last_activity[org_id] = time.monotonic()
+        self._tasks_since_review[org_id] = self._tasks_since_review.get(org_id, 0) + 1
+
+    def _compute_adaptive_interval(self, org: Organization) -> float:
+        """Compute heartbeat interval based on recent activity level."""
+        base = org.heartbeat_interval_s
+        last = self._last_activity.get(org.id, 0)
+        if last <= 0:
+            return base
+
+        idle_secs = time.monotonic() - last
+        if idle_secs < 300:
+            return max(base * 0.17, 300)
+        elif idle_secs < 900:
+            return max(base * 0.33, 600)
+        elif idle_secs < 3600:
+            return base
+        else:
+            return min(base * 2, 3600)
 
     async def start_for_org(self, org: Organization) -> None:
         """Start heartbeat and standup schedules for an organization."""
@@ -78,7 +102,9 @@ class OrgHeartbeat:
     async def _heartbeat_loop(self, org: Organization) -> None:
         while True:
             try:
-                await asyncio.sleep(org.heartbeat_interval_s)
+                interval = self._compute_adaptive_interval(org)
+                logger.info(f"[Heartbeat] Next heartbeat for {org.name} in {interval:.0f}s")
+                await asyncio.sleep(interval)
 
                 current = self._runtime.get_org(org.id)
                 if not current or current.status not in (OrgStatus.ACTIVE, OrgStatus.RUNNING):
@@ -177,12 +203,22 @@ class OrgHeartbeat:
         es.emit("heartbeat_triggered", "system", {
             "node_count": len(org.nodes),
         })
+        await self._runtime._broadcast_ws("org:heartbeat_start", {
+            "org_id": org.id, "type": "heartbeat",
+            "has_core_business": bool(org.core_business),
+        })
 
         result = await self._runtime.send_command(org.id, roots[0].id, prompt)
 
         es.emit("heartbeat_decision", roots[0].id, {
             "result_preview": str(result.get("result", ""))[:200],
         })
+        await self._runtime._broadcast_ws("org:heartbeat_done", {
+            "org_id": org.id, "type": "heartbeat",
+            "result_preview": str(result.get("result", ""))[:120],
+        })
+
+        self._tasks_since_review[org.id] = 0
 
         dismissed = self._runtime.get_scaler().try_reclaim_idle_clones(org.id)
         if dismissed:
@@ -196,10 +232,11 @@ class OrgHeartbeat:
     # ------------------------------------------------------------------
 
     async def _standup_loop(self, org: Organization) -> None:
-        """Simple interval-based standup (cron parsing deferred to Phase 4)."""
+        """Milestone-driven review: triggers when N tasks complete or all nodes idle."""
+        milestone_threshold = 5
         while True:
             try:
-                await asyncio.sleep(3600)
+                await asyncio.sleep(60)
 
                 current = self._runtime.get_org(org.id)
                 if not current or current.status not in (OrgStatus.ACTIVE, OrgStatus.RUNNING):
@@ -207,9 +244,23 @@ class OrgHeartbeat:
                 if not current.standup_enabled:
                     break
 
-                now = datetime.now(timezone.utc)
-                if now.weekday() < 5 and now.hour == 9:
+                tasks_done = self._tasks_since_review.get(org.id, 0)
+                all_idle = all(
+                    n.status.value == "idle" for n in current.nodes if not n.is_clone
+                )
+
+                should_review = (
+                    tasks_done >= milestone_threshold
+                    or (all_idle and tasks_done > 0)
+                )
+
+                if should_review:
+                    logger.info(
+                        f"[Heartbeat] Milestone review for {org.id}: "
+                        f"{tasks_done} tasks done, all_idle={all_idle}"
+                    )
                     await self._execute_standup(current)
+                    self._tasks_since_review[org.id] = 0
 
             except asyncio.CancelledError:
                 break
@@ -247,9 +298,16 @@ class OrgHeartbeat:
         )
 
         es.emit("standup_started", "system")
+        await self._runtime._broadcast_ws("org:heartbeat_start", {
+            "org_id": org.id, "type": "standup",
+        })
         result = await self._runtime.send_command(org.id, roots[0].id, prompt)
         es.emit("standup_completed", "system", {
             "result_preview": str(result.get("result", ""))[:200],
+        })
+        await self._runtime._broadcast_ws("org:heartbeat_done", {
+            "org_id": org.id, "type": "standup",
+            "result_preview": str(result.get("result", ""))[:120],
         })
 
         now = datetime.now(timezone.utc)

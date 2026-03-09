@@ -48,7 +48,7 @@ ORG_NODE_TOOLS: list[dict] = [
             "properties": {
                 "to_node": {"type": "string", "description": "目标下级节点 ID"},
                 "task": {"type": "string", "description": "任务描述"},
-                "deadline": {"type": "string", "description": "截止时间（ISO 格式，可选）"},
+                "deadline": {"type": "string", "description": "截止时间（ISO 格式，可选）。AI 节点通常在分钟内完成任务，建议设置 5-30 分钟的 deadline"},
                 "priority": {"type": "integer", "default": 0},
             },
             "required": ["to_node", "task"],

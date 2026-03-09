@@ -101,6 +101,7 @@ class OrgRuntime:
         self._cascade_depth: dict[str, int] = {}
         self.max_cascade_depth: int = 5
         self.max_concurrent_per_node: int = 2
+        self._idle_tasks: dict[str, asyncio.Task] = {}
 
         self._started = False
 
@@ -133,6 +134,11 @@ class OrgRuntime:
 
         await self._heartbeat.stop_all()
         await self._scheduler.stop_all()
+
+        for _org_id, idle_task in list(self._idle_tasks.items()):
+            if idle_task and not idle_task.done():
+                idle_task.cancel()
+        self._idle_tasks.clear()
 
         for org_id, tasks in list(self._running_tasks.items()):
             for node_id, task in tasks.items():
@@ -223,6 +229,8 @@ class OrgRuntime:
         if org.core_business and org.core_business.strip():
             asyncio.ensure_future(self._auto_kickoff(org))
 
+        self._idle_tasks[org_id] = asyncio.ensure_future(self._idle_probe_loop(org_id))
+
         return org
 
     async def stop_org(self, org_id: str) -> Organization:
@@ -235,6 +243,10 @@ class OrgRuntime:
 
         await self._heartbeat.stop_for_org(org_id)
         await self._scheduler.stop_for_org(org_id)
+
+        idle_task = self._idle_tasks.pop(org_id, None)
+        if idle_task and not idle_task.done():
+            idle_task.cancel()
 
         org_tasks = self._running_tasks.pop(org_id, {})
         for node_id, task in org_tasks.items():
@@ -377,6 +389,15 @@ class OrgRuntime:
             return {"error": f"{node.role_title} 已下线"}
 
         cache_key = f"{org.id}:{node.id}"
+
+        if node.status == NodeStatus.ERROR:
+            self._agent_cache.pop(cache_key, None)
+            self.get_event_store(org.id).emit(
+                "node_auto_recovered", node.id,
+                {"previous_status": "error"},
+            )
+            logger.info(f"[OrgRuntime] Auto-recovering node {node.id} from ERROR state")
+
         agent = await self._get_or_create_agent(org, node)
 
         node.status = NodeStatus.BUSY
@@ -387,24 +408,52 @@ class OrgRuntime:
         )
         await self._broadcast_ws("org:node_status", {
             "org_id": org.id, "node_id": node.id, "status": "busy",
+            "current_task": prompt[:120],
         })
 
         try:
             session_id = f"org:{org.id}:node:{node.id}"
 
-            result_text = await self._run_agent_task(agent, prompt, session_id, org, node)
+            result_text, timed_out = await self._run_agent_task(
+                agent, prompt, session_id, org, node,
+            )
+
+            if timed_out:
+                node.status = NodeStatus.IDLE
+                self._save_org(org)
+                self.get_event_store(org.id).emit(
+                    "task_timeout", node.id,
+                    {"timeout_s": node.timeout_s if node.timeout_s > 0 else 300},
+                )
+                await self._broadcast_ws("org:node_status", {
+                    "org_id": org.id, "node_id": node.id, "status": "idle",
+                    "current_task": "",
+                })
+                await self._broadcast_ws("org:task_timeout", {
+                    "org_id": org.id, "node_id": node.id,
+                    "timeout_s": node.timeout_s if node.timeout_s > 0 else 300,
+                })
+                return {"node_id": node.id, "result": result_text, "timeout": True}
 
             node.status = NodeStatus.IDLE
             org.total_tasks_completed += 1
             self._save_org(org)
+            self._heartbeat.record_activity(org.id)
 
             self.get_event_store(org.id).emit(
                 "task_completed", node.id,
                 {"result_preview": result_text[:200] if result_text else ""},
             )
+            await self._broadcast_ws("org:node_status", {
+                "org_id": org.id, "node_id": node.id, "status": "idle",
+                "current_task": "",
+            })
             await self._broadcast_ws("org:task_complete", {
                 "org_id": org.id, "node_id": node.id,
+                "result_preview": result_text[:120] if result_text else "",
             })
+
+            asyncio.ensure_future(self._post_task_hook(org, node))
 
             return {"node_id": node.id, "result": result_text}
 
@@ -415,26 +464,33 @@ class OrgRuntime:
             self.get_event_store(org.id).emit(
                 "task_failed", node.id, {"error": str(e)[:200]},
             )
+            await self._broadcast_ws("org:node_status", {
+                "org_id": org.id, "node_id": node.id, "status": "error",
+                "current_task": "",
+            })
             return {"node_id": node.id, "error": str(e)}
 
     async def _run_agent_task(
         self, agent: Any, prompt: str, session_id: str,
         org: Organization, node: OrgNode,
-    ) -> str:
-        """Run a single agent task with timeout. Returns the agent's response text."""
+    ) -> tuple[str, bool]:
+        """Run a single agent task with timeout.
+
+        Returns (response_text, timed_out).
+        """
         timeout = node.timeout_s if node.timeout_s > 0 else 300
         try:
             response = await asyncio.wait_for(
                 agent.chat(prompt, session_id=session_id),
                 timeout=timeout,
             )
-            return response or ""
-        except asyncio.TimeoutError:
+            return (response or "", False)
+        except TimeoutError:
             logger.warning(f"[OrgRuntime] Task timeout ({timeout}s) for {node.id}")
-            return f"(任务超时，超过 {timeout} 秒限制)"
+            return (f"(任务超时，超过 {timeout} 秒限制)", True)
         except asyncio.CancelledError:
             logger.info(f"[OrgRuntime] Task cancelled for {node.id}")
-            return "(任务已取消)"
+            return ("(任务已取消)", False)
         except Exception as e:
             logger.error(f"[OrgRuntime] Agent task error: {e}")
             raise
@@ -795,7 +851,10 @@ class OrgRuntime:
             if reason:
                 extra = f"\n打回原因: {reason}\n请根据反馈修改后重新用 org_submit_deliverable 提交。"
         elif msg.msg_type == MsgType.TASK_ASSIGN:
-            extra = f"\n完成后请用 org_submit_deliverable 提交交付物，task_chain_id={chain_id}"
+            if chain_id:
+                extra = f"\n完成后请用 org_submit_deliverable 提交交付物，task_chain_id={chain_id}"
+            else:
+                extra = "\n完成后请用 org_submit_deliverable 提交交付物。"
 
         return f"{prefix}:\n{msg.content}{extra}"
 
@@ -994,6 +1053,115 @@ class OrgRuntime:
                         pass
         except Exception as e:
             logger.debug(f"[OrgRuntime] MCP connect for node failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Task completion hook & idle probe
+    # ------------------------------------------------------------------
+
+    async def _post_task_hook(self, org: Organization, node: OrgNode) -> None:
+        """After a node finishes, notify its parent/supervisor to continue work."""
+        try:
+            await asyncio.sleep(2)
+            org = self.get_org(org.id)
+            if not org or org.status not in (OrgStatus.ACTIVE, OrgStatus.RUNNING):
+                return
+            node = org.get_node(node.id)
+            if not node or node.status != NodeStatus.IDLE:
+                return
+
+            parent = org.get_parent(node.id)
+            if not parent:
+                return
+            if parent.status in (NodeStatus.BUSY, NodeStatus.FROZEN, NodeStatus.OFFLINE):
+                return
+
+            messenger = self.get_messenger(org.id)
+            pending = messenger.get_pending_count(parent.id) if messenger else 0
+
+            if pending > 0:
+                return
+
+            role_title = node.role_title or node.id
+            prompt = (
+                f"[任务完成通知] {role_title} 刚完成了一项任务并回到空闲状态。\n"
+                f"请检查当前进展，看是否有新任务需要分配给 {role_title} 或其他成员。\n"
+                f"如果所有工作已完成，请更新黑板上的进度记录。"
+            )
+            self._cascade_depth[f"{org.id}:{parent.id}"] = 0
+            await self._activate_and_run(org, parent, prompt)
+        except Exception as e:
+            logger.debug(f"[OrgRuntime] Post-task hook error: {e}")
+
+    async def _idle_probe_loop(self, org_id: str) -> None:
+        """Periodically check for idle nodes and prompt them to seek work.
+
+        Uses per-node adaptive thresholds: each node's threshold grows after
+        being probed (120s → 180s → 270s → ... max 600s), and resets when
+        the node becomes busy again (indicating it received work).
+        """
+        node_thresholds: dict[str, float] = {}
+        node_last_probed: dict[str, float] = {}
+        base_threshold = 120.0
+
+        while True:
+            try:
+                await asyncio.sleep(30)
+                org = self.get_org(org_id)
+                if not org or org.status not in (OrgStatus.ACTIVE, OrgStatus.RUNNING):
+                    break
+
+                now = time.monotonic()
+                for node in org.nodes:
+                    if node.status != NodeStatus.IDLE:
+                        node_thresholds.pop(node.id, None)
+                        node_last_probed.pop(node.id, None)
+                        continue
+                    if node.is_clone:
+                        continue
+
+                    cache_key = f"{org_id}:{node.id}"
+                    cached = self._agent_cache.get(cache_key)
+                    last_active = cached.last_used if cached else 0
+                    idle_secs = now - last_active if last_active > 0 else 0
+
+                    threshold = node_thresholds.get(node.id, base_threshold)
+
+                    if 0 < idle_secs >= threshold:
+                        last_probe = node_last_probed.get(node.id, 0)
+                        if last_probe > 0 and (now - last_probe) < threshold * 0.8:
+                            continue
+
+                        messenger = self.get_messenger(org_id)
+                        pending = messenger.get_pending_count(node.id) if messenger else 0
+                        if pending > 0:
+                            continue
+
+                        roots = org.get_root_nodes()
+                        is_root = node.id in [r.id for r in roots]
+
+                        if is_root:
+                            prompt = (
+                                f"[空闲检查] 你已空闲 {int(idle_secs)} 秒。\n"
+                                f"请查看组织黑板（org_read_blackboard），确认是否有待推进的工作。\n"
+                                f"如果有未完成的目标，请安排下一步任务。如果一切正常，简要说明当前状态即可。"
+                            )
+                        else:
+                            prompt = (
+                                f"[空闲检查] 你已空闲 {int(idle_secs)} 秒。\n"
+                                f"请查看是否有待办工作，或向上级汇报空闲状态以获取新任务。"
+                            )
+
+                        self._cascade_depth[cache_key] = 0
+                        node_last_probed[node.id] = now
+                        node_thresholds[node.id] = min(threshold * 1.5, 600)
+                        await self._activate_and_run(org, node, prompt)
+                        break
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"[OrgRuntime] Idle probe error for {org_id}: {e}")
+                await asyncio.sleep(30)
 
     async def _broadcast_ws(self, event: str, data: dict) -> None:
         try:

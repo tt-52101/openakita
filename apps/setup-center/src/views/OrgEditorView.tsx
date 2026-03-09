@@ -92,6 +92,7 @@ interface OrgNodeData {
   auto_clone_enabled?: boolean;
   auto_clone_threshold?: number;
   auto_clone_max?: number;
+  current_task?: string;
 }
 
 interface OrgEdgeData {
@@ -309,6 +310,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 function OrgNodeComponent({ data, selected }: { data: OrgNodeData; selected: boolean }) {
+  const [hovered, setHovered] = useState(false);
   const deptColor = getDeptColor(data.department);
   const statusColor = STATUS_COLORS[data.status] || "var(--muted)";
   const isFrozen = data.status === "frozen";
@@ -318,17 +320,26 @@ function OrgNodeComponent({ data, selected }: { data: OrgNodeData; selected: boo
   const isClone = data.is_clone;
   const isEphemeral = data.ephemeral;
 
+  const rt = (data as any)._runtime;
+  const idleSecs = rt?.idle_seconds;
+  const pendingMsgs = rt?.pending_messages;
+  const isAnomaly = rt?.anomaly;
+
   return (
     <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         background: "var(--card-bg, #fff)",
-        border: `2px solid ${selected ? "var(--primary)" : isError ? "var(--danger)" : isBusy ? statusColor : "var(--line)"}`,
+        border: `2px solid ${selected ? "var(--primary)" : isAnomaly ? "#f59e0b" : isError ? "var(--danger)" : isBusy ? statusColor : "var(--line)"}`,
         borderRadius: "var(--radius)",
         padding: 0,
         minWidth: 180,
         maxWidth: 220,
         boxShadow: selected
           ? "0 0 0 2px var(--primary)"
+          : isAnomaly
+          ? "0 0 12px rgba(245,158,11,0.35)"
           : isBusy
           ? `0 0 16px ${statusColor}50`
           : isError
@@ -355,9 +366,11 @@ function OrgNodeComponent({ data, selected }: { data: OrgNodeData; selected: boo
         borderRadius: "var(--radius) var(--radius) 0 0",
         background: isBusy
           ? `linear-gradient(90deg, ${deptColor}, ${statusColor}, ${deptColor})`
+          : isAnomaly
+          ? "linear-gradient(90deg, #f59e0b, #fbbf24, #f59e0b)"
           : deptColor,
-        backgroundSize: isBusy ? "200% 100%" : undefined,
-        animation: isBusy ? "orgStripFlow 2s linear infinite" : undefined,
+        backgroundSize: isBusy || isAnomaly ? "200% 100%" : undefined,
+        animation: isBusy ? "orgStripFlow 2s linear infinite" : isAnomaly ? "orgStripFlow 3s linear infinite" : undefined,
       }} />
 
       <div style={{ padding: "8px 12px" }}>
@@ -413,7 +426,7 @@ function OrgNodeComponent({ data, selected }: { data: OrgNodeData; selected: boo
           </div>
         )}
 
-        {/* Department + status tags */}
+        {/* Department + status tags + runtime metrics */}
         <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
           {data.department && (
             <span style={{
@@ -439,7 +452,42 @@ function OrgNodeComponent({ data, selected }: { data: OrgNodeData; selected: boo
               {STATUS_LABELS[data.status] || data.status}
             </span>
           )}
+          {pendingMsgs > 0 && (
+            <span style={{
+              fontSize: 9, padding: "1px 5px", borderRadius: 10,
+              background: "#fef2f2", color: "#dc2626", fontWeight: 600,
+            }}>
+              {pendingMsgs}
+            </span>
+          )}
+          {idleSecs != null && idleSecs > 60 && data.status === "idle" && (
+            <span style={{
+              fontSize: 9, padding: "1px 5px", borderRadius: 3,
+              background: "#f3f4f6", color: "#9ca3af",
+            }}>
+              {idleSecs >= 3600 ? `${Math.floor(idleSecs / 3600)}h` : `${Math.floor(idleSecs / 60)}m`}
+            </span>
+          )}
         </div>
+
+        {/* Current task indicator */}
+        {isBusy && data.current_task && (
+          <div style={{
+            fontSize: 9, color: statusColor, marginTop: 3,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            maxWidth: 180, fontStyle: "italic", opacity: 0.85,
+          }}>
+            {data.current_task.slice(0, 40)}{data.current_task.length > 40 ? "..." : ""}
+          </div>
+        )}
+
+        {/* Anomaly warning */}
+        {isAnomaly && (
+          <div style={{ fontSize: 9, color: "#f59e0b", marginTop: 3, display: "flex", alignItems: "center", gap: 3 }}>
+            <IconAlertCircle size={10} color="#f59e0b" />
+            <span>{typeof isAnomaly === "string" ? isAnomaly : "需要关注"}</span>
+          </div>
+        )}
 
         {/* Frozen indicator */}
         {isFrozen && (
@@ -449,6 +497,26 @@ function OrgNodeComponent({ data, selected }: { data: OrgNodeData; selected: boo
           </div>
         )}
       </div>
+
+      {/* Hover tooltip */}
+      {hovered && rt && (
+        <div style={{
+          position: "absolute", left: "105%", top: 0, zIndex: 100,
+          background: "var(--card-bg, #fff)", border: "1px solid var(--line)",
+          borderRadius: 6, padding: "8px 10px", minWidth: 140,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.15)", fontSize: 10,
+          pointerEvents: "none",
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 11 }}>{data.role_title}</div>
+          <div style={{ color: "#6b7280", lineHeight: 1.6 }}>
+            <div>状态: <span style={{ color: statusColor, fontWeight: 500 }}>{STATUS_LABELS[data.status] || data.status}</span></div>
+            {idleSecs != null && <div>空闲: {idleSecs >= 3600 ? `${Math.floor(idleSecs / 3600)}h${Math.floor((idleSecs % 3600) / 60)}m` : idleSecs >= 60 ? `${Math.floor(idleSecs / 60)}m` : `${idleSecs}s`}</div>}
+            {pendingMsgs != null && <div>待处理: {pendingMsgs} 条消息</div>}
+            {data.current_task && <div style={{ marginTop: 2, color: "#b45309" }}>任务: {data.current_task.slice(0, 50)}</div>}
+            {isAnomaly && <div style={{ marginTop: 2, color: "#f59e0b", fontWeight: 500 }}>{typeof isAnomaly === "string" ? isAnomaly : "异常"}</div>}
+          </div>
+        </div>
+      )}
 
       <Handle type="source" position={Position.Bottom} style={{ background: "var(--primary)", width: 8, height: 8 }} />
     </div>
@@ -489,8 +557,20 @@ export function OrgEditorView({
   const [inboxOpen, setInboxOpen] = useState(false);
   const [nodeEvents, setNodeEvents] = useState<any[]>([]);
   const [nodeSchedules, setNodeSchedules] = useState<any[]>([]);
+  const [nodeMessages, setNodeMessages] = useState<any[]>([]);
+  const [nodeThinking, setNodeThinking] = useState<any[]>([]);
+  const [orgStats, setOrgStats] = useState<any>(null);
+  const [expandedThinkingIdx, setExpandedThinkingIdx] = useState<number | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "ok" | "error" } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Activity feed state
+  type ActivityEvent = { id: string; time: number; event: string; data: any };
+  const [activityFeed, setActivityFeed] = useState<ActivityEvent[]>([]);
+  const [showActivityFeed, setShowActivityFeed] = useState(false);
+  const activityFeedRef = useRef<HTMLDivElement>(null);
+  const [edgeAnimations, setEdgeAnimations] = useState<Record<string, { color: string; ts: number }>>({});
+  const [edgeFlowCounts, setEdgeFlowCounts] = useState<Record<string, number>>({});
 
   // React Flow state
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([] as Node[]);
@@ -633,6 +713,28 @@ export function OrgEditorView({
   }, [currentOrg?.id, selectedNodeId, bbScope, fetchBlackboard]);
 
   // ── WebSocket for live mode ──
+
+  const pushActivity = useCallback((event: string, data: any) => {
+    const entry: ActivityEvent = { id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, time: Date.now(), event, data };
+    setActivityFeed((prev) => [entry, ...prev].slice(0, 200));
+  }, []);
+
+  const triggerEdgeAnimation = useCallback((fromNode: string, toNode: string, color: string) => {
+    const edgeKey = edges.find(
+      (e) => (e.source === fromNode && e.target === toNode) || (e.source === toNode && e.target === fromNode),
+    )?.id;
+    if (!edgeKey) return;
+    setEdgeAnimations((prev) => ({ ...prev, [edgeKey]: { color, ts: Date.now() } }));
+    setEdgeFlowCounts((prev) => ({ ...prev, [edgeKey]: (prev[edgeKey] || 0) + 1 }));
+    setTimeout(() => {
+      setEdgeAnimations((prev) => {
+        const copy = { ...prev };
+        if (copy[edgeKey]?.ts && Date.now() - copy[edgeKey].ts >= 4500) delete copy[edgeKey];
+        return copy;
+      });
+    }, 5000);
+  }, [edges]);
+
   useEffect(() => {
     if (!liveMode || !currentOrg) return;
     const wsUrl = apiBaseUrl.replace(/^http/, "ws") + "/ws";
@@ -641,23 +743,53 @@ export function OrgEditorView({
       ws = new WebSocket(wsUrl);
       ws.onmessage = (evt) => {
         try {
-          const data = JSON.parse(evt.data);
-          if (data.event === "org:node_status" && data.data?.org_id === currentOrg.id) {
-            const { node_id, status } = data.data;
+          const parsed = JSON.parse(evt.data);
+          const ev = parsed.event as string;
+          const d = parsed.data;
+          if (!d || d.org_id !== currentOrg.id) return;
+
+          if (ev === "org:node_status") {
+            const { node_id, status, current_task } = d;
             setNodeStatuses((prev) => ({ ...prev, [node_id]: status }));
             setNodes((prev) =>
               prev.map((n) =>
                 n.id === node_id
-                  ? { ...n, data: { ...n.data, status } }
+                  ? { ...n, data: { ...n.data, status, current_task: current_task || n.data.current_task } }
                   : n,
               ),
             );
+            if (status === "busy") pushActivity(ev, d);
+          } else if (ev === "org:task_delegated") {
+            pushActivity(ev, d);
+            triggerEdgeAnimation(d.from_node, d.to_node, "var(--primary)");
+          } else if (ev === "org:task_delivered") {
+            pushActivity(ev, d);
+            triggerEdgeAnimation(d.from_node, d.to_node, "var(--ok)");
+          } else if (ev === "org:task_accepted") {
+            pushActivity(ev, d);
+            triggerEdgeAnimation(d.accepted_by, d.from_node, "#22c55e");
+          } else if (ev === "org:task_rejected") {
+            pushActivity(ev, d);
+            triggerEdgeAnimation(d.rejected_by, d.from_node, "var(--danger)");
+          } else if (ev === "org:escalation") {
+            pushActivity(ev, d);
+            triggerEdgeAnimation(d.from_node, d.to_node, "var(--danger)");
+          } else if (ev === "org:message") {
+            pushActivity(ev, d);
+            triggerEdgeAnimation(d.from_node, d.to_node, "#a78bfa");
+          } else if (ev === "org:blackboard_update") {
+            pushActivity(ev, d);
+            if (currentOrg && !selectedNodeId) fetchBlackboard(currentOrg.id, bbScope);
+          } else if (ev === "org:heartbeat_start" || ev === "org:heartbeat_done") {
+            pushActivity(ev, d);
+          } else if (ev === "org:task_complete") {
+            pushActivity(ev, d);
           }
         } catch { /* ignore parse errors */ }
       };
     } catch { /* WebSocket not available */ }
     return () => { ws?.close(); };
-  }, [liveMode, currentOrg, apiBaseUrl, setNodes]);
+  }, [liveMode, currentOrg, apiBaseUrl, setNodes, pushActivity, triggerEdgeAnimation, selectedNodeId, bbScope, fetchBlackboard]);
 
   // ── Start/Stop org ──
   const handleStartOrg = useCallback(async () => {
@@ -878,24 +1010,76 @@ export function OrgEditorView({
     if (!selectedNodeId || !currentOrg || !liveMode) {
       setNodeEvents([]);
       setNodeSchedules([]);
+      setNodeMessages([]);
+      setNodeThinking([]);
       return;
     }
     const fetchNodeDetail = async () => {
       try {
-        const [eventsRes, schedulesRes] = await Promise.all([
+        const [eventsRes, schedulesRes, msgsRes, thinkingRes] = await Promise.all([
           safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/events?actor=${selectedNodeId}&limit=20`),
           safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/nodes/${selectedNodeId}/schedules`),
+          safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/messages?from_node=${selectedNodeId}&limit=20`),
+          safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/nodes/${selectedNodeId}/thinking?limit=30`),
         ]);
         if (eventsRes.ok) setNodeEvents(await eventsRes.json());
         if (schedulesRes.ok) setNodeSchedules(await schedulesRes.json());
+        if (msgsRes.ok) {
+          const data = await msgsRes.json();
+          setNodeMessages(data.messages || data || []);
+        }
+        if (thinkingRes.ok) {
+          const data = await thinkingRes.json();
+          setNodeThinking(data.timeline || []);
+        }
       } catch (e) {
         console.error("Failed to fetch node detail:", e);
       }
     };
     fetchNodeDetail();
-    const interval = setInterval(fetchNodeDetail, 15000);
+    const interval = setInterval(fetchNodeDetail, 8000);
     return () => clearInterval(interval);
   }, [selectedNodeId, currentOrg, liveMode, apiBaseUrl]);
+
+  // ── Fetch org stats in live mode ──
+  useEffect(() => {
+    if (!currentOrg || !liveMode) { setOrgStats(null); return; }
+    const fetchStats = async () => {
+      try {
+        const res = await safeFetch(`${apiBaseUrl}/api/orgs/${currentOrg.id}/stats`);
+        if (res.ok) setOrgStats(await res.json());
+      } catch (e) { /* ignore */ }
+    };
+    fetchStats();
+    const interval = setInterval(fetchStats, 8000);
+    return () => clearInterval(interval);
+  }, [currentOrg, liveMode, apiBaseUrl]);
+
+  // ── Inject runtime metrics into nodes from orgStats ──
+  useEffect(() => {
+    if (!orgStats?.per_node || !orgStats?.anomalies) return;
+    const nodeMap = new Map<string, any>();
+    for (const nd of orgStats.per_node) nodeMap.set(nd.id, nd);
+    const anomalyMap = new Map<string, string>();
+    for (const a of orgStats.anomalies) anomalyMap.set(a.node_id, a.message);
+    setNodes((prev) =>
+      prev.map((n) => {
+        const rt = nodeMap.get(n.id);
+        if (!rt) return n;
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            _runtime: {
+              idle_seconds: rt.idle_seconds,
+              pending_messages: rt.pending_messages,
+              anomaly: anomalyMap.get(n.id) || null,
+            },
+          },
+        };
+      }),
+    );
+  }, [orgStats, setNodes]);
 
   // ── Selected node data ──
 
@@ -1104,6 +1288,54 @@ export function OrgEditorView({
             >
               <IconInbox size={12} /> {!isMobile && "消息"}
             </button>
+            {liveMode && (
+              <>
+                <button
+                  className="btnSmall"
+                  onClick={() => setShowActivityFeed(!showActivityFeed)}
+                  style={{
+                    fontWeight: showActivityFeed ? 600 : 400,
+                    color: showActivityFeed ? "var(--ok)" : undefined,
+                    background: showActivityFeed ? "rgba(34,197,94,0.1)" : undefined,
+                    position: "relative",
+                  }}
+                >
+                  <IconRadar size={12} /> {!isMobile && "动态"}
+                  {activityFeed.length > 0 && !showActivityFeed && (
+                    <span style={{
+                      position: "absolute", top: -2, right: -2,
+                      width: 6, height: 6, borderRadius: "50%",
+                      background: "var(--ok)", animation: "orgDotPulse 1.5s ease-in-out infinite",
+                    }} />
+                  )}
+                </button>
+                {orgStats && !isMobile && (
+                  <div style={{
+                    display: "flex", gap: 8, alignItems: "center",
+                    fontSize: 10, color: "#6b7280", marginLeft: 4,
+                    padding: "2px 8px", borderRadius: 4,
+                    background: "var(--bg-secondary)",
+                  }}>
+                    <span title="组织健康度" style={{
+                      width: 7, height: 7, borderRadius: "50%",
+                      background: orgStats.health === "critical" ? "#ef4444" : orgStats.health === "warning" ? "#f59e0b" : orgStats.health === "attention" ? "#3b82f6" : "#22c55e",
+                      animation: orgStats.health !== "healthy" ? "orgDotPulse 1.5s ease-in-out infinite" : undefined,
+                    }} />
+                    <span title="完成任务数">✓ {orgStats.total_tasks_completed ?? 0}</span>
+                    <span title="消息数">✉ {orgStats.total_messages_exchanged ?? 0}</span>
+                    {orgStats.pending_messages > 0 && <span title="待处理" style={{ color: "#f59e0b" }}>⏳ {orgStats.pending_messages}</span>}
+                    {orgStats.anomalies?.length > 0 && <span title="告警数" style={{ color: "#ef4444", fontWeight: 600 }}>⚠ {orgStats.anomalies.length}</span>}
+                    {orgStats.uptime_s > 0 && (
+                      <span title="运行时间">
+                        {orgStats.uptime_s >= 3600
+                          ? `${Math.floor(orgStats.uptime_s / 3600)}h${Math.floor((orgStats.uptime_s % 3600) / 60)}m`
+                          : `${Math.floor(orgStats.uptime_s / 60)}m`}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
             {!isMobile && (
               <button
                 className="btnSmall"
@@ -1325,10 +1557,24 @@ export function OrgEditorView({
 
         {/* React Flow canvas */}
         {currentOrg ? (
+          <>
           <div style={{ flex: 1 }}>
             <ReactFlow
               nodes={nodes}
-              edges={edges}
+              edges={edges.map((e) => {
+                const anim = edgeAnimations[e.id];
+                const flowCount = liveMode ? edgeFlowCounts[e.id] : undefined;
+                const base = flowCount && flowCount > 0
+                  ? { ...e, label: `${(e.data as any)?.label || ""} ${flowCount > 0 ? `(${flowCount})` : ""}`.trim() || undefined }
+                  : e;
+                if (!anim) return base;
+                return {
+                  ...base,
+                  animated: true,
+                  style: { ...base.style, stroke: anim.color, strokeWidth: 3, filter: `drop-shadow(0 0 4px ${anim.color})` },
+                  markerEnd: { ...(base.markerEnd as any), color: anim.color },
+                };
+              })}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
@@ -1373,6 +1619,81 @@ export function OrgEditorView({
               )}
             </ReactFlow>
           </div>
+
+          {/* Activity Feed Panel */}
+          {liveMode && showActivityFeed && (
+            <div style={{
+              height: 160, borderTop: "1px solid var(--line)", background: "var(--bg-app)",
+              overflowY: "auto", flexShrink: 0, fontSize: 11,
+            }} ref={activityFeedRef}>
+              <div style={{ padding: "6px 10px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--line)", position: "sticky", top: 0, background: "var(--bg-app)", zIndex: 1 }}>
+                <span style={{ fontWeight: 600, fontSize: 11 }}>实时活动</span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button className="btnSmall" onClick={() => setActivityFeed([])} style={{ fontSize: 10 }}>清空</button>
+                  <button className="btnSmall" onClick={() => setShowActivityFeed(false)} style={{ fontSize: 10 }}><IconX size={10} /></button>
+                </div>
+              </div>
+              {activityFeed.length === 0 ? (
+                <div style={{ padding: 12, color: "var(--muted)", textAlign: "center" }}>等待活动...</div>
+              ) : (
+                activityFeed.map((ev) => {
+                  const t = new Date(ev.time);
+                  const ts = `${t.getHours().toString().padStart(2, "0")}:${t.getMinutes().toString().padStart(2, "0")}:${t.getSeconds().toString().padStart(2, "0")}`;
+                  const nodeLabel = (id: string) => {
+                    const n = nodes.find((n) => n.id === id);
+                    return (n?.data as any)?.role_title || id?.slice(0, 8) || "?";
+                  };
+                  let icon = "●";
+                  let color = "var(--muted)";
+                  let text = ev.event;
+
+                  if (ev.event === "org:task_delegated") {
+                    icon = "→"; color = "var(--primary)";
+                    text = `${nodeLabel(ev.data.from_node)} → ${nodeLabel(ev.data.to_node)}：委派「${ev.data.task?.slice(0, 40) || ""}」`;
+                  } else if (ev.event === "org:task_delivered") {
+                    icon = "📦"; color = "var(--ok)";
+                    text = `${nodeLabel(ev.data.from_node)} → ${nodeLabel(ev.data.to_node)}：提交交付物`;
+                  } else if (ev.event === "org:task_accepted") {
+                    icon = "✓"; color = "#22c55e";
+                    text = `${nodeLabel(ev.data.accepted_by)} 验收通过 ${nodeLabel(ev.data.from_node)} 的交付`;
+                  } else if (ev.event === "org:task_rejected") {
+                    icon = "✗"; color = "var(--danger)";
+                    text = `${nodeLabel(ev.data.rejected_by)} 打回 ${nodeLabel(ev.data.from_node)}：${ev.data.reason?.slice(0, 30) || ""}`;
+                  } else if (ev.event === "org:escalation") {
+                    icon = "⬆"; color = "var(--danger)";
+                    text = `${nodeLabel(ev.data.from_node)} 上报：${ev.data.content?.slice(0, 40) || ""}`;
+                  } else if (ev.event === "org:message") {
+                    icon = "💬"; color = "#a78bfa";
+                    text = `${nodeLabel(ev.data.from_node)} → ${nodeLabel(ev.data.to_node)}：${ev.data.content?.slice(0, 40) || ""}`;
+                  } else if (ev.event === "org:blackboard_update") {
+                    icon = "📋"; color = "#f59e0b";
+                    text = `${nodeLabel(ev.data.node_id)} 写入${ev.data.scope === "department" ? "部门" : "组织"}黑板`;
+                  } else if (ev.event === "org:heartbeat_start") {
+                    icon = "💓"; color = "#ec4899";
+                    text = `${ev.data.type === "standup" ? "晨会" : "经营复盘"}开始...`;
+                  } else if (ev.event === "org:heartbeat_done") {
+                    icon = "💓"; color = "#ec4899";
+                    text = `${ev.data.type === "standup" ? "晨会" : "复盘"}完成`;
+                  } else if (ev.event === "org:task_complete") {
+                    icon = "✔"; color = "#22c55e";
+                    text = `${nodeLabel(ev.data.node_id)} 完成任务`;
+                  } else if (ev.event === "org:node_status" && ev.data.status === "busy") {
+                    icon = "⚡"; color = "var(--primary)";
+                    text = `${nodeLabel(ev.data.node_id)} 开始执行`;
+                  }
+
+                  return (
+                    <div key={ev.id} style={{ padding: "3px 10px", display: "flex", gap: 6, alignItems: "flex-start", borderBottom: "1px solid var(--line)" }}>
+                      <span style={{ color: "var(--muted)", fontFamily: "monospace", flexShrink: 0, fontSize: 10 }}>{ts}</span>
+                      <span style={{ color, flexShrink: 0 }}>{icon}</span>
+                      <span style={{ color: "var(--text)", flex: 1, wordBreak: "break-all" }}>{text}</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+          </>
         ) : (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}
             onClick={() => { if (isMobile) setShowLeftPanel(true); }}
@@ -1559,9 +1880,9 @@ export function OrgEditorView({
                           </div>
                           {evt.data && Object.keys(evt.data).length > 0 && (
                             <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, marginLeft: 12 }}>
-                              {Object.entries(evt.data).slice(0, 2).map(([k, v]) => (
+                              {Object.entries(evt.data).slice(0, 3).map(([k, v]) => (
                                 <span key={k} style={{ marginRight: 8 }}>
-                                  {k}: {String(v).slice(0, 40)}
+                                  {k}: {String(v).slice(0, 60)}
                                 </span>
                               ))}
                             </div>
@@ -1571,6 +1892,328 @@ export function OrgEditorView({
                     </div>
                   )}
                 </div>
+
+                {/* Thought chain (merged timeline) */}
+                <div className="card" style={{ padding: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                    思维链
+                    {nodeThinking.length > 0 && (
+                      <span style={{ fontSize: 10, color: "#9ca3af", fontWeight: 400, marginLeft: 4 }}>
+                        ({nodeThinking.length})
+                      </span>
+                    )}
+                  </div>
+                  {nodeThinking.length === 0 ? (
+                    <div style={{ fontSize: 11, color: "#9ca3af" }}>暂无思维链记录</div>
+                  ) : (
+                    <div style={{ maxHeight: 400, overflowY: "auto" }}>
+                      {nodeThinking.slice(0, 30).map((item: any, i: number) => {
+                        const isMsg = item.type === "message";
+                        const isEvent = item.type === "event";
+                        const ts = item.timestamp || "";
+                        const isExpanded = expandedThinkingIdx === i;
+
+                        if (isMsg) {
+                          const isOut = item.direction === "out";
+                          const msgTypeColors: Record<string, string> = {
+                            task_assign: "#7c3aed", task_result: "#059669",
+                            question: "#2563eb", answer: "#0891b2",
+                            escalation: "#dc2626", deliverable: "#d97706",
+                          };
+                          return (
+                            <div key={i}
+                              onClick={() => setExpandedThinkingIdx(isExpanded ? null : i)}
+                              style={{
+                                padding: "6px 0", borderBottom: "1px solid var(--line)", fontSize: 11,
+                                cursor: "pointer", background: isExpanded ? "var(--bg-secondary)" : undefined,
+                              }}
+                            >
+                              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                <span style={{
+                                  fontSize: 10, padding: "1px 5px", borderRadius: 3,
+                                  background: isOut ? "#dbeafe" : "#fef3c7",
+                                  color: isOut ? "#1d4ed8" : "#92400e",
+                                  fontWeight: 500,
+                                }}>
+                                  {isOut ? `→ ${item.peer}` : `← ${item.peer}`}
+                                </span>
+                                {item.msg_type && (
+                                  <span style={{
+                                    fontSize: 9, padding: "1px 4px", borderRadius: 3,
+                                    background: `${msgTypeColors[item.msg_type] || "#6b7280"}18`,
+                                    color: msgTypeColors[item.msg_type] || "#6b7280",
+                                  }}>
+                                    {item.msg_type.replace(/_/g, " ")}
+                                  </span>
+                                )}
+                                <span style={{ color: "#9ca3af", fontSize: 10, marginLeft: "auto" }}>
+                                  {ts.slice?.(11, 19) || ""}
+                                </span>
+                              </div>
+                              <div style={{
+                                marginTop: 3, fontSize: 11, color: "#374151",
+                                whiteSpace: "pre-wrap", wordBreak: "break-word",
+                                maxHeight: isExpanded ? "none" : 60,
+                                overflow: isExpanded ? "visible" : "hidden",
+                                lineHeight: 1.4,
+                              }}>
+                                {isExpanded
+                                  ? (item.content || "")
+                                  : (item.content || "").length > 150
+                                    ? (item.content || "").slice(0, 150) + "…"
+                                    : item.content}
+                              </div>
+                              {!isExpanded && (item.content || "").length > 150 && (
+                                <div style={{ fontSize: 9, color: "var(--primary)", marginTop: 2 }}>
+                                  点击展开全文
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        if (isEvent) {
+                          const evtType = item.event_type || "";
+                          const isToolCall = evtType.includes("tool");
+                          const isComplete = evtType.includes("complete");
+                          const isError = evtType.includes("fail") || evtType.includes("error");
+                          return (
+                            <div key={i}
+                              onClick={() => setExpandedThinkingIdx(isExpanded ? null : i)}
+                              style={{
+                                padding: "4px 0", borderBottom: "1px solid var(--line)", fontSize: 11,
+                                cursor: "pointer", background: isExpanded ? "var(--bg-secondary)" : undefined,
+                              }}
+                            >
+                              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                <span style={{
+                                  width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                                  background: isError ? "var(--danger)" : isComplete ? "var(--ok)"
+                                    : isToolCall ? "#7c3aed" : "var(--primary)",
+                                }} />
+                                <span style={{
+                                  fontWeight: 500, fontSize: 10,
+                                  color: isToolCall ? "#7c3aed" : undefined,
+                                }}>
+                                  {isToolCall ? "🔧 " : ""}{evtType.replace(/_/g, " ")}
+                                </span>
+                                <span style={{ color: "#9ca3af", fontSize: 10, marginLeft: "auto" }}>
+                                  {ts.slice?.(11, 19) || ""}
+                                </span>
+                              </div>
+                              {item.data && Object.keys(item.data).length > 0 && (
+                                <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, marginLeft: 12 }}>
+                                  {Object.entries(item.data).slice(0, isExpanded ? 20 : 3).map(([k, v]) => (
+                                    <div key={k} style={{ marginBottom: 1 }}>
+                                      <span style={{ fontWeight: 500 }}>{k}</span>: {isExpanded ? String(v) : String(v).slice(0, 80)}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {!isExpanded && item.data && Object.keys(item.data).length > 3 && (
+                                <div style={{ fontSize: 9, color: "var(--primary)", marginTop: 2, marginLeft: 12 }}>
+                                  点击查看全部 {Object.keys(item.data).length} 个字段
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        return null;
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Current task detail */}
+                {selectedNode.current_task && (
+                  <div className="card" style={{ padding: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: "#b45309" }}>
+                      当前任务
+                    </div>
+                    <div style={{
+                      fontSize: 11,
+                      color: "#374151",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      lineHeight: 1.4,
+                      background: "#fffbeb",
+                      padding: 8,
+                      borderRadius: 4,
+                      border: "1px solid #fde68a",
+                    }}>
+                      {selectedNode.current_task}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Org-level stats dashboard (live mode, no node selected) ── */}
+            {propsTab === "live" && liveMode && !selectedNodeId && orgStats && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+                {/* Health indicator */}
+                <div className="card" style={{
+                  padding: "10px 12px", display: "flex", alignItems: "center", gap: 10,
+                  borderLeft: `4px solid ${orgStats.health === "critical" ? "#ef4444" : orgStats.health === "warning" ? "#f59e0b" : orgStats.health === "attention" ? "#3b82f6" : "#22c55e"}`,
+                }}>
+                  <div style={{
+                    width: 12, height: 12, borderRadius: "50%",
+                    background: orgStats.health === "critical" ? "#ef4444" : orgStats.health === "warning" ? "#f59e0b" : orgStats.health === "attention" ? "#3b82f6" : "#22c55e",
+                    animation: orgStats.health !== "healthy" ? "orgDotPulse 1.5s ease-in-out infinite" : undefined,
+                    boxShadow: `0 0 8px ${orgStats.health === "critical" ? "#ef4444" : orgStats.health === "warning" ? "#f59e0b" : orgStats.health === "attention" ? "#3b82f6" : "#22c55e"}60`,
+                  }} />
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>
+                      {orgStats.health === "healthy" ? "运行正常" : orgStats.health === "critical" ? "存在异常" : orgStats.health === "warning" ? "需要关注" : "有待观察"}
+                    </div>
+                    <div style={{ fontSize: 10, color: "#9ca3af" }}>
+                      {orgStats.anomalies?.length > 0 ? `${orgStats.anomalies.length} 个告警` : "所有节点状态良好"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* KPI grid */}
+                <div className="card" style={{ padding: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>运行指标</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                    {[
+                      { label: "运行时长", value: orgStats.uptime_s ? (orgStats.uptime_s >= 3600 ? `${Math.floor(orgStats.uptime_s / 3600)}h${Math.floor((orgStats.uptime_s % 3600) / 60)}m` : `${Math.round(orgStats.uptime_s / 60)}m`) : "-", color: "var(--primary)" },
+                      { label: "完成任务", value: orgStats.total_tasks_completed ?? 0, color: "#22c55e" },
+                      { label: "消息交换", value: orgStats.total_messages_exchanged ?? 0, color: "#3b82f6" },
+                      { label: "待处理", value: orgStats.pending_messages ?? 0, color: orgStats.pending_messages > 5 ? "#f59e0b" : "#6b7280" },
+                      { label: "未读消息", value: orgStats.unread_inbox ?? 0, color: orgStats.unread_inbox > 0 ? "#dc2626" : "#6b7280" },
+                      { label: "待审批", value: orgStats.pending_approvals ?? 0, color: orgStats.pending_approvals > 0 ? "#7c3aed" : "#6b7280" },
+                    ].map((item) => (
+                      <div key={item.label} style={{
+                        padding: 6, background: "var(--bg-secondary)",
+                        borderRadius: 6, textAlign: "center",
+                      }}>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: item.color }}>{item.value}</div>
+                        <div style={{ fontSize: 9, color: "#9ca3af", marginTop: 1 }}>{item.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Anomaly alerts */}
+                {orgStats.anomalies?.length > 0 && (
+                  <div className="card" style={{ padding: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "#f59e0b" }}>
+                      告警 ({orgStats.anomalies.length})
+                    </div>
+                    <div style={{ maxHeight: 150, overflowY: "auto" }}>
+                      {orgStats.anomalies.map((a: any, i: number) => (
+                        <div key={i} style={{
+                          display: "flex", gap: 6, alignItems: "flex-start",
+                          padding: "4px 0", borderBottom: "1px solid var(--line)", fontSize: 11,
+                        }}>
+                          <span style={{
+                            fontSize: 9, padding: "1px 5px", borderRadius: 3, flexShrink: 0,
+                            background: a.type === "error" ? "#fef2f2" : a.type === "stuck" ? "#fffbeb" : "#f0f9ff",
+                            color: a.type === "error" ? "#dc2626" : a.type === "stuck" ? "#b45309" : "#2563eb",
+                            fontWeight: 500,
+                          }}>
+                            {a.type === "error" ? "错误" : a.type === "stuck" ? "卡住" : a.type === "long_idle" ? "空闲" : "积压"}
+                          </span>
+                          <div>
+                            <span style={{ fontWeight: 500 }}>{a.role_title}</span>
+                            <div style={{ fontSize: 10, color: "#6b7280" }}>{a.message}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Node load table */}
+                <div className="card" style={{ padding: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>节点负荷</div>
+                  <div style={{ maxHeight: 200, overflowY: "auto" }}>
+                    {(orgStats.per_node || []).map((nd: any) => {
+                      const st = nd.status || "idle";
+                      const hasAnomaly = orgStats.anomalies?.some((a: any) => a.node_id === nd.id);
+                      return (
+                        <div key={nd.id} style={{
+                          display: "flex", alignItems: "center", gap: 6,
+                          padding: "5px 0", borderBottom: "1px solid var(--line)", fontSize: 11,
+                          background: hasAnomaly ? "#fffbeb08" : undefined,
+                        }}
+                          onClick={() => { setSelectedNodeId(nd.id); }}
+                        >
+                          <span style={{
+                            width: 8, height: 8, borderRadius: "50%",
+                            background: STATUS_COLORS[st] || "#9ca3af", flexShrink: 0,
+                            boxShadow: hasAnomaly ? "0 0 6px #f59e0b" : undefined,
+                          }} />
+                          <span style={{ fontWeight: 500, flex: 1, cursor: "pointer" }}>{nd.role_title}</span>
+                          <span style={{
+                            fontSize: 9, padding: "1px 4px", borderRadius: 3,
+                            background: `${STATUS_COLORS[st] || "#9ca3af"}20`,
+                            color: STATUS_COLORS[st] || "#9ca3af",
+                          }}>
+                            {STATUS_LABELS[st] || st}
+                          </span>
+                          {nd.idle_seconds != null && nd.idle_seconds > 60 && st === "idle" && (
+                            <span style={{ fontSize: 9, color: "#9ca3af" }}>
+                              {nd.idle_seconds >= 3600 ? `${Math.floor(nd.idle_seconds / 3600)}h` : `${Math.floor(nd.idle_seconds / 60)}m`}
+                            </span>
+                          )}
+                          {nd.pending_messages > 0 && (
+                            <span style={{ fontSize: 9, color: "#dc2626", fontWeight: 600 }}>
+                              {nd.pending_messages}
+                            </span>
+                          )}
+                          {nd.current_task && (
+                            <span style={{ fontSize: 9, color: "#6b7280", maxWidth: 60, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {nd.current_task}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Recent blackboard changes */}
+                {orgStats.recent_blackboard?.length > 0 && (
+                  <div className="card" style={{ padding: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>黑板最新动态</div>
+                    <div style={{ maxHeight: 160, overflowY: "auto" }}>
+                      {orgStats.recent_blackboard.map((bb: any, i: number) => (
+                        <div key={i} style={{
+                          padding: "5px 0", borderBottom: "1px solid var(--line)", fontSize: 11,
+                        }}>
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <span style={{
+                              fontSize: 9, padding: "1px 4px", borderRadius: 3,
+                              background: bb.memory_type === "decision" ? "#ede9fe" : bb.memory_type === "progress" ? "#dcfce7" : "#f0f9ff",
+                              color: bb.memory_type === "decision" ? "#7c3aed" : bb.memory_type === "progress" ? "#16a34a" : "#2563eb",
+                              fontWeight: 500,
+                            }}>
+                              {bb.memory_type}
+                            </span>
+                            <span style={{ fontSize: 10, color: "#9ca3af" }}>{bb.source_node}</span>
+                            <span style={{ fontSize: 10, color: "#d4d4d8", marginLeft: "auto" }}>
+                              {bb.timestamp?.slice?.(11, 19) || ""}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 10, color: "#374151", marginTop: 2, lineHeight: 1.4 }}>
+                            {bb.content}
+                          </div>
+                          {bb.tags?.length > 0 && (
+                            <div style={{ display: "flex", gap: 3, marginTop: 2 }}>
+                              {bb.tags.map((t: string) => (
+                                <span key={t} style={{ fontSize: 8, padding: "0 3px", borderRadius: 2, background: "#f3f4f6", color: "#6b7280" }}>#{t}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
