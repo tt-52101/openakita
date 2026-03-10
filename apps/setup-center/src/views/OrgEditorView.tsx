@@ -59,6 +59,7 @@ import { safeFetch } from "../providers";
 import { openPopupWindow, canOpenPopupWindow, IS_CAPACITOR } from "../platform";
 import { OrgInboxSidebar } from "../components/OrgInboxSidebar";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { OrgAvatar, AVATAR_PRESETS, AVATAR_MAP } from "../components/OrgAvatars";
 
 // ── Time helpers (always show local timezone) ──
 
@@ -110,6 +111,7 @@ interface OrgNodeData {
   clone_source: string | null;
   external_tools: string[];
   ephemeral: boolean;
+  avatar: string | null;
   frozen_by: string | null;
   frozen_reason: string | null;
   frozen_at: string | null;
@@ -401,43 +403,41 @@ function OrgNodeComponent({ data, selected }: { data: OrgNodeData; selected: boo
         animation: isBusy ? "orgStripFlow 2s linear infinite" : isAnomaly ? "orgStripFlow 3s linear infinite" : undefined,
       }} />
 
-      <div style={{ padding: "8px 12px" }}>
-        {/* Status dot + title */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-          <div
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: statusColor,
-              flexShrink: 0,
-              boxShadow: isBusy ? `0 0 8px ${statusColor}` : isError ? `0 0 6px var(--danger)` : "none",
-              animation: isBusy ? "orgDotPulse 1.5s ease-in-out infinite" : undefined,
-            }}
-          />
-          <span style={{
-            fontSize: 13,
-            fontWeight: 600,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            flex: 1,
-          }}>
-            {data.role_title}
-          </span>
-          {(isClone || isEphemeral) && (
+      <div style={{ padding: "8px 10px", display: "flex", gap: 8, alignItems: "flex-start" }}>
+        {/* Avatar */}
+        <OrgAvatar
+          avatarId={data.avatar}
+          size={30}
+          statusColor={statusColor}
+          statusGlow={isBusy}
+          style={isBusy ? { border: `2px solid ${statusColor}` } : isError ? { border: "2px solid var(--danger)" } : undefined}
+        />
+        {/* Title area */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }}>
             <span style={{
-              fontSize: 9,
-              padding: "0 4px",
-              borderRadius: 3,
-              background: isEphemeral ? "#fef3c7" : "#e0f2fe",
-              color: isEphemeral ? "#b45309" : "#0369a1",
-              fontWeight: 500,
+              fontSize: 13,
+              fontWeight: 600,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              flex: 1,
             }}>
-              {isEphemeral ? "临时" : "副本"}
+              {data.role_title}
             </span>
-          )}
-        </div>
+            {(isClone || isEphemeral) && (
+              <span style={{
+                fontSize: 9,
+                padding: "0 4px",
+                borderRadius: 3,
+                background: isEphemeral ? "#fef3c7" : "#e0f2fe",
+                color: isEphemeral ? "#b45309" : "#0369a1",
+                fontWeight: 500,
+              }}>
+                {isEphemeral ? "临时" : "副本"}
+              </span>
+            )}
+          </div>
 
         {/* Goal preview */}
         {data.role_goal && (
@@ -524,6 +524,7 @@ function OrgNodeComponent({ data, selected }: { data: OrgNodeData; selected: boo
             <span>{data.frozen_reason || "已冻结"}</span>
           </div>
         )}
+        </div>{/* close title area */}
       </div>
 
       {/* Hover tooltip via Portal to escape ReactFlow stacking context */}
@@ -1074,6 +1075,7 @@ export function OrgEditorView({
       frozen_by: null,
       frozen_reason: null,
       frozen_at: null,
+      avatar: null,
       status: "idle",
     };
     setNodes((prev) => [...prev, orgNodeToFlowNode(newNode)]);
@@ -2375,6 +2377,27 @@ export function OrgEditorView({
 
             {propsTab === "basic" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>头像</label>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {AVATAR_PRESETS.map((av) => {
+                    const isSel = selectedNode.avatar === av.id;
+                    return (
+                      <OrgAvatar
+                        key={av.id}
+                        avatarId={av.id}
+                        size={36}
+                        onClick={() => updateNodeData("avatar", av.id)}
+                        style={{
+                          cursor: "pointer",
+                          border: isSel ? "2.5px solid var(--primary)" : "2.5px solid transparent",
+                          boxShadow: isSel ? "0 0 0 2px var(--primary)" : "none",
+                          opacity: isSel ? 1 : 0.75,
+                          transition: "all 0.15s",
+                        }}
+                      />
+                    );
+                  })}
+                </div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>岗位名称</label>
                 <input
                   className="input"

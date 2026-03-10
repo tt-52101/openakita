@@ -133,6 +133,7 @@ class OrgNode:
     is_clone: bool = False
     clone_source: str | None = None
     ephemeral: bool = False
+    avatar: str | None = None
     external_tools: list[str] = field(default_factory=list)
     frozen_by: str | None = None
     frozen_reason: str | None = None
@@ -167,6 +168,7 @@ class OrgNode:
             "is_clone": self.is_clone,
             "clone_source": self.clone_source,
             "ephemeral": self.ephemeral,
+            "avatar": self.avatar,
             "external_tools": list(self.external_tools) if self.external_tools else [],
             "frozen_by": self.frozen_by,
             "frozen_reason": self.frozen_reason,

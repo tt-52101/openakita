@@ -60,6 +60,12 @@ async def create_org(request: Request):
     return org.to_dict()
 
 
+@router.get("/avatar-presets")
+async def get_avatar_presets():
+    from openakita.orgs.tool_categories import list_avatar_presets
+    return list_avatar_presets()
+
+
 @router.get("/templates")
 async def list_templates(request: Request):
     mgr = _get_manager(request)
