@@ -8,11 +8,9 @@ import {
   DotGreen, DotGray,
 } from "../icons";
 import { safeFetch } from "../providers";
+import { ModalOverlay } from "../components/ModalOverlay";
 import { logger } from "../platform";
 import { IS_WEB, onWsEvent } from "../platform";
-
-import type { IMBot } from "./im-shared";
-import { BOT_TYPES, BOT_TYPE_LABELS, CREDENTIAL_FIELDS, EMPTY_BOT } from "./im-shared";
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -54,6 +52,15 @@ type IMMessage = {
   chain_summary?: ChainSummaryItem[] | null;
 };
 
+type IMBot = {
+  id: string;
+  type: string;
+  name: string;
+  agent_profile_id: string;
+  enabled: boolean;
+  credentials: Record<string, unknown>;
+};
+
 type AgentProfile = {
   id: string;
   name: string;
@@ -61,6 +68,65 @@ type AgentProfile = {
 };
 
 const DEFAULT_API = "http://127.0.0.1:18900";
+
+const BOT_TYPES = ["feishu", "telegram", "dingtalk", "wework", "wework_ws", "onebot", "qqbot"] as const;
+
+const BOT_TYPE_LABELS: Record<string, string> = {
+  feishu: "飞书",
+  telegram: "Telegram",
+  dingtalk: "钉钉",
+  wework: "企业微信(HTTP)",
+  wework_ws: "企业微信(WS)",
+  onebot: "OneBot (QQ)",
+  qqbot: "QQ 官方机器人",
+};
+
+const WEWORK_TYPES = new Set(["wework", "wework_ws"]);
+
+const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; secret?: boolean }[]> = {
+  feishu: [
+    { key: "app_id", label: "App ID" },
+    { key: "app_secret", label: "App Secret", secret: true },
+  ],
+  telegram: [
+    { key: "bot_token", label: "Bot Token", secret: true },
+    { key: "webhook_url", label: "Webhook URL" },
+  ],
+  dingtalk: [
+    { key: "client_id", label: "Client ID / App Key" },
+    { key: "client_secret", label: "Client Secret / App Secret", secret: true },
+  ],
+  wework: [
+    { key: "corp_id", label: "Corp ID" },
+    { key: "token", label: "Token", secret: true },
+    { key: "encoding_aes_key", label: "Encoding AES Key", secret: true },
+    { key: "callback_port", label: "Callback Port" },
+    { key: "callback_host", label: "Callback Host" },
+  ],
+  wework_ws: [
+    { key: "bot_id", label: "Bot ID" },
+    { key: "secret", label: "Secret", secret: true },
+  ],
+  onebot: [
+    { key: "ws_url", label: "WebSocket URL" },
+    { key: "access_token", label: "Access Token", secret: true },
+  ],
+  qqbot: [
+    { key: "app_id", label: "App ID" },
+    { key: "app_secret", label: "App Secret", secret: true },
+    { key: "sandbox", label: "Sandbox (true/false)" },
+    { key: "mode", label: "Mode (websocket/webhook)" },
+  ],
+};
+
+const EMPTY_BOT: IMBot = {
+  id: "",
+  type: "feishu",
+  name: "",
+  agent_profile_id: "default",
+  enabled: true,
+  credentials: {},
+};
 
 // ─── Main Component ─────────────────────────────────────────────────────
 
@@ -184,26 +250,28 @@ export function IMView({
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       {/* Tabs */}
-      <div style={{
-        display: "flex", gap: 0, borderBottom: "1px solid var(--line)",
-        padding: "0 16px", background: "var(--panel)", flexShrink: 0,
-      }}>
-        {(["messages", "bots"] as const).map((key) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            style={{
-              padding: "10px 20px", border: "none", cursor: "pointer",
-              background: "transparent", fontSize: 13, fontWeight: tab === key ? 600 : 400,
-              color: tab === key ? "var(--primary, #3b82f6)" : "inherit",
-              borderBottom: tab === key ? "2px solid var(--primary, #3b82f6)" : "2px solid transparent",
-              transition: "all 0.15s",
-            }}
-          >
-            {key === "messages" ? t("im.tabMessages") : t("im.tabBots")}
-          </button>
-        ))}
-      </div>
+      {multiAgentEnabled && (
+        <div style={{
+          display: "flex", gap: 0, borderBottom: "1px solid var(--line)",
+          padding: "0 16px", background: "var(--panel)", flexShrink: 0,
+        }}>
+          {(["messages", "bots"] as const).map((key) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              style={{
+                padding: "10px 20px", border: "none", cursor: "pointer",
+                background: "transparent", fontSize: 13, fontWeight: tab === key ? 600 : 400,
+                color: tab === key ? "var(--primary, #3b82f6)" : "inherit",
+                borderBottom: tab === key ? "2px solid var(--primary, #3b82f6)" : "2px solid transparent",
+                transition: "all 0.15s",
+              }}
+            >
+              {key === "messages" ? t("im.tabMessages") : t("im.tabBots")}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Tab Content */}
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
@@ -400,13 +468,6 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
 
 // ─── Bot Configuration Tab ──────────────────────────────────────────────
 
-type EnvBot = {
-  type: string;
-  env_enabled: boolean;
-  migrated: boolean;
-  credentials: Record<string, unknown>;
-};
-
 function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAgentEnabled: boolean }) {
   const { t } = useTranslation();
   const [bots, setBots] = useState<IMBot[]>([]);
@@ -419,8 +480,6 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: "ok" | "err" } | null>(null);
   const [revealedSecrets, setRevealedSecrets] = useState<Set<string>>(new Set());
-  const [envBots, setEnvBots] = useState<EnvBot[]>([]);
-  const [migrating, setMigrating] = useState(false);
 
   const showToast = useCallback((text: string, type: "ok" | "err" = "ok") => {
     setToastMsg({ text, type });
@@ -445,32 +504,12 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
     } catch { /* ignore */ }
   }, [apiBase]);
 
-  const fetchEnvBots = useCallback(async () => {
-    try {
-      const res = await safeFetch(`${apiBase}/api/agents/env-bots`);
-      const data = await res.json();
-      setEnvBots((data.env_bots || []).filter((eb: EnvBot) => !eb.migrated));
-    } catch { /* ignore */ }
-  }, [apiBase]);
-
-  const handleMigrateEnv = async () => {
-    setMigrating(true);
-    try {
-      await safeFetch(`${apiBase}/api/agents/bots/migrate-from-env`, { method: "POST" });
-      showToast(t("im.migrationSuccess"), "ok");
-      fetchBots();
-      fetchEnvBots();
-    } catch (e) {
-      showToast(String(e) || t("im.migrationFailed"), "err");
-    }
-    setMigrating(false);
-  };
-
   useEffect(() => {
-    fetchBots();
-    fetchEnvBots();
-    if (multiAgentEnabled) fetchProfiles();
-  }, [multiAgentEnabled, fetchBots, fetchProfiles, fetchEnvBots]);
+    if (multiAgentEnabled) {
+      fetchBots();
+      fetchProfiles();
+    }
+  }, [multiAgentEnabled, fetchBots, fetchProfiles]);
 
   const openCreate = () => {
     setEditingBot({ ...EMPTY_BOT });
@@ -508,6 +547,7 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
             credentials: editingBot.credentials,
           }
         : {
+            type: editingBot.type,
             name: editingBot.name,
             agent_profile_id: editingBot.agent_profile_id,
             enabled: editingBot.enabled,
@@ -560,7 +600,14 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
 
   const credFields = CREDENTIAL_FIELDS[editingBot.type] || [];
 
-  // Bot management is always available; agent binding only shows in multi-agent mode
+  if (!multiAgentEnabled) {
+    return (
+      <div style={{ padding: 40, textAlign: "center", opacity: 0.5 }}>
+        <IconBot size={48} />
+        <div style={{ marginTop: 12, fontWeight: 700 }}>{t("im.needMultiAgent")}</div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: 20, position: "relative" }}>
@@ -610,36 +657,6 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
         </button>
       </div>
 
-      {/* Env legacy migration banner */}
-      {envBots.length > 0 && (
-        <div style={{
-          padding: "12px 16px", borderRadius: 10, marginBottom: 16,
-          background: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.25)",
-          display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
-        }}>
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <div style={{ fontWeight: 600, fontSize: 13, color: "#d97706" }}>
-              {t("im.envLegacyTitle")}
-            </div>
-            <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
-              {t("im.envLegacyDesc", { count: envBots.length, types: envBots.map(b => BOT_TYPE_LABELS[b.type] || b.type).join(", ") })}
-            </div>
-          </div>
-          <button
-            onClick={handleMigrateEnv}
-            disabled={migrating}
-            style={{
-              padding: "6px 14px", borderRadius: 8, border: "none",
-              background: "#d97706", color: "#fff", cursor: migrating ? "wait" : "pointer",
-              fontSize: 12, fontWeight: 600, opacity: migrating ? 0.6 : 1,
-              whiteSpace: "nowrap",
-            }}
-          >
-            {migrating ? "..." : t("im.migrateNow")}
-          </button>
-        </div>
-      )}
-
       {/* Bot Grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
         {bots.map((bot) => {
@@ -684,11 +701,9 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
                   <div style={{ fontSize: 11, opacity: 0.45, fontFamily: "monospace" }}>{bot.id}</div>
                 </div>
               </div>
-              {multiAgentEnabled && (
-                <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 10 }}>
-                  {t("im.botAgent")}: {agentProfile?.name || bot.agent_profile_id}
-                </div>
-              )}
+              <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 10 }}>
+                {t("im.botAgent")}: {agentProfile?.name || bot.agent_profile_id}
+              </div>
 
               {/* Actions */}
               <div style={{ display: "flex", gap: 8 }}>
@@ -741,15 +756,15 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
 
       {/* Delete confirmation overlay */}
       {confirmDeleteId && (
-        <div style={{
+        <ModalOverlay onClose={() => setConfirmDeleteId(null)} className="" style={{
           position: "fixed", inset: 0, zIndex: 9000,
           background: "rgba(0,0,0,0.35)", display: "flex",
           alignItems: "center", justifyContent: "center",
-        }} onClick={() => setConfirmDeleteId(null)}>
+        }}>
           <div style={{
             background: "var(--panel)", borderRadius: 12, padding: 24,
             minWidth: 320, boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
-          }} onClick={(e) => e.stopPropagation()}>
+          }}>
             <div style={{ fontWeight: 600, marginBottom: 12 }}>{t("im.botConfirmDelete")}</div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button
@@ -773,15 +788,20 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
               </button>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* Slide-in Editor Panel */}
       {editorOpen && (
+        <ModalOverlay onClose={closeEditor} className="" style={{
+          position: "fixed", inset: 0, zIndex: 7999,
+          background: "rgba(15, 23, 42, 0.45)", backdropFilter: "blur(4px)",
+          display: "flex", justifyContent: "flex-end",
+        }}>
         <div style={{
-          position: "fixed", top: 0, right: 0, bottom: 0, width: 420,
+          position: "relative", width: 420, height: "100%",
           background: "var(--panel)", borderLeft: "1px solid var(--line)",
-          boxShadow: "-4px 0 24px rgba(0,0,0,0.12)", zIndex: 8000,
+          boxShadow: "-4px 0 24px rgba(0,0,0,0.12)",
           display: "flex", flexDirection: "column",
           animation: "slideInRight 0.2s ease-out",
         }}>
@@ -844,8 +864,11 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
             <label style={{ display: "block", marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{t("im.botType")}</div>
               <select
-                value={editingBot.type}
-                onChange={(e) => setEditingBot((p) => ({ ...p, type: e.target.value, credentials: {} }))}
+                value={WEWORK_TYPES.has(editingBot.type) ? "wework_ws" : editingBot.type}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setEditingBot((p) => ({ ...p, type: val, credentials: {} }));
+                }}
                 disabled={!isCreating}
                 style={{
                   width: "100%", padding: "8px 10px", borderRadius: 6,
@@ -853,34 +876,32 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
                   fontSize: 13, boxSizing: "border-box",
                 }}
               >
-                {BOT_TYPES.map((bt) => (
-                  <option key={bt} value={bt}>{BOT_TYPE_LABELS[bt] || bt}</option>
+                {BOT_TYPES.filter((bt) => bt !== "wework").map((bt) => (
+                  <option key={bt} value={bt}>{bt === "wework_ws" ? "企业微信" : (BOT_TYPE_LABELS[bt] || bt)}</option>
                 ))}
               </select>
             </label>
 
-            {/* Agent Profile — only visible in multi-agent mode */}
-            {multiAgentEnabled && (
-              <label style={{ display: "block", marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{t("im.botAgent")}</div>
-                <select
-                  value={editingBot.agent_profile_id}
-                  onChange={(e) => setEditingBot((p) => ({ ...p, agent_profile_id: e.target.value }))}
-                  style={{
-                    width: "100%", padding: "8px 10px", borderRadius: 6,
-                    border: "1px solid var(--line)", background: "var(--bg)",
-                    fontSize: 13, boxSizing: "border-box",
-                  }}
-                >
-                  <option value="default">{t("im.botAgentDefault")}</option>
-                  {profiles.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.icon} {p.name} ({p.id})
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
+            {/* Agent Profile */}
+            <label style={{ display: "block", marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{t("im.botAgent")}</div>
+              <select
+                value={editingBot.agent_profile_id}
+                onChange={(e) => setEditingBot((p) => ({ ...p, agent_profile_id: e.target.value }))}
+                style={{
+                  width: "100%", padding: "8px 10px", borderRadius: 6,
+                  border: "1px solid var(--line)", background: "var(--bg)",
+                  fontSize: 13, boxSizing: "border-box",
+                }}
+              >
+                <option value="default">{t("im.botAgentDefault")}</option>
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.icon} {p.name} ({p.id})
+                  </option>
+                ))}
+              </select>
+            </label>
 
             {/* Enabled toggle */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
@@ -901,6 +922,39 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
                 }} />
               </div>
             </div>
+
+            {/* WeWork mode selector */}
+            {WEWORK_TYPES.has(editingBot.type) && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{t("config.imWeworkMode")}</div>
+                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                  {(["wework_ws", "wework"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={editingBot.type === m ? "capChipActive" : "capChip"}
+                      onClick={() => {
+                        if (editingBot.type !== m) {
+                          setEditingBot((p) => ({ ...p, type: m, credentials: {} }));
+                        }
+                      }}
+                      style={{
+                        padding: "4px 12px", borderRadius: 6, fontSize: 11, cursor: "pointer",
+                        border: editingBot.type === m ? "1px solid var(--accent)" : "1px solid var(--line)",
+                        background: editingBot.type === m ? "var(--accent-bg, rgba(59,130,246,0.1))" : "transparent",
+                        color: editingBot.type === m ? "var(--accent, #3b82f6)" : "inherit",
+                        fontWeight: editingBot.type === m ? 600 : 400,
+                      }}
+                    >
+                      {m === "wework_ws" ? t("config.imWeworkModeWs") : t("config.imWeworkModeHttp")}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                  {editingBot.type === "wework_ws" ? t("config.imWeworkModeWsHint") : t("config.imWeworkModeHttpHint")}
+                </div>
+              </div>
+            )}
 
             {/* Credentials */}
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>{t("im.botCredentials")}</div>
@@ -969,6 +1023,7 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
             </button>
           </div>
         </div>
+        </ModalOverlay>
       )}
     </div>
   );

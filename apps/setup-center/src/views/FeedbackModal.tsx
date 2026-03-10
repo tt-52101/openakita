@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { downloadFile, showInFolder } from "../platform";
 import { IconX, IconInfo } from "../icons";
 import { safeFetch } from "../providers";
+import { ModalOverlay } from "../components/ModalOverlay";
 
 type FeedbackMode = "bug" | "feature";
 
@@ -242,11 +243,10 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
   const isBug = mode === "bug";
 
   return (
-    <div className="modalOverlay" onClick={handleClose}>
+    <ModalOverlay onClose={handleClose}>
       <div
         className="modalContent"
         style={{ width: 560, maxHeight: "85vh" }}
-        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="dialogHeader">
@@ -547,6 +547,6 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
