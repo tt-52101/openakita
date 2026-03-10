@@ -294,12 +294,9 @@ def create_app(
         }
 
     # ── Serve uploaded avatar files ──
-    from pathlib import Path as _Path
-
     from fastapi.staticfiles import StaticFiles as _StaticFiles
-
-    from openakita.core.config import get_data_dir as _get_data_dir
-    _avatar_dir = _Path(_get_data_dir()) / "avatars"
+    from openakita.config import settings as _settings
+    _avatar_dir = _settings.data_dir / "avatars"
     _avatar_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/api/avatars", _StaticFiles(directory=str(_avatar_dir)), name="avatars")
 

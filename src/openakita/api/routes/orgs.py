@@ -97,8 +97,8 @@ async def upload_avatar(request: Request, file: UploadFile = _FILE_FIELD):
     digest = hashlib.md5(data).hexdigest()[:12]
     filename = f"{digest}_{int(time.time())}{ext}"
 
-    from openakita.core.config import get_data_dir
-    avatar_dir = Path(get_data_dir()) / "avatars"
+    from openakita.config import settings
+    avatar_dir = settings.data_dir / "avatars"
     avatar_dir.mkdir(parents=True, exist_ok=True)
     dest = avatar_dir / filename
     dest.write_bytes(data)
