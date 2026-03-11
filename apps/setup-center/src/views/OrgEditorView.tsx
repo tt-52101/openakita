@@ -2019,10 +2019,15 @@ export function OrgEditorView({
           )}
 
           {/* ═══ Slide-out Chat Panel ═══ */}
-          {chatPanelOpen && selectedOrgId && (
+          {/* Slide-out chat panel: always mounted when org is selected, toggled via display */}
+          {selectedOrgId && (
             <>
-              <div className="org-chat-overlay" onClick={() => setChatPanelOpen(false)} />
-              <div className="org-chat-slide">
+              <div
+                className="org-chat-overlay"
+                onClick={() => setChatPanelOpen(false)}
+                style={{ display: chatPanelOpen ? undefined : "none" }}
+              />
+              <div className="org-chat-slide" style={{ display: chatPanelOpen ? undefined : "none" }}>
                 <OrgChatPanel
                   orgId={selectedOrgId}
                   nodeId={chatPanelNode}

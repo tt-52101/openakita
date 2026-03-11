@@ -53,11 +53,10 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
   useEffect(() => {
     let cancelled = false;
     setLoaded(false);
+    const url = `${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/history`;
     (async () => {
       try {
-        const res = await safeFetch(
-          `${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/history`
-        );
+        const res = await safeFetch(url);
         const data = await res.json();
         if (cancelled) return;
         const msgs: ChatMsg[] = (data.messages || []).map((m: any) => ({
@@ -66,8 +65,10 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
           content: m.content || "",
           timestamp: m.timestamp || Date.now(),
         }));
+        console.log(`[OrgChat] Loaded ${msgs.length} messages for ${convId}`);
         setMessages(msgs);
-      } catch {
+      } catch (err) {
+        console.warn(`[OrgChat] Failed to load history for ${convId}:`, err);
         if (!cancelled) setMessages([]);
       } finally {
         if (!cancelled) setLoaded(true);
@@ -76,16 +77,25 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
     return () => { cancelled = true; };
   }, [convId, apiBaseUrl]);
 
-  // Push messages to backend session
+  // Push messages to backend session (standalone fetch, survives component unmount)
+  const persistRef = useRef({ apiBaseUrl, convId });
+  persistRef.current = { apiBaseUrl, convId };
+
   const persistMessages = useCallback(async (msgs: { role: string; content: string }[]) => {
+    const { apiBaseUrl: base, convId: cid } = persistRef.current;
+    const url = `${base}/api/sessions/${encodeURIComponent(cid)}/messages`;
     try {
-      await safeFetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/messages`, {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: msgs }),
       });
-    } catch { /* backend unavailable, messages still shown in UI */ }
-  }, [apiBaseUrl, convId]);
+      const data = await res.json();
+      console.log(`[OrgChat] Persisted ${msgs.length} messages for ${cid}:`, data);
+    } catch (err) {
+      console.error(`[OrgChat] Failed to persist messages for ${cid}:`, err);
+    }
+  }, []);
 
   const handleClear = useCallback(async () => {
     setMessages([]);
@@ -205,14 +215,14 @@ export function OrgChatPanel({ orgId, nodeId, apiBaseUrl, compact, showHeader, t
       ));
     } finally {
       unsubProgress();
-      setSending(false);
-      // Persist user + assistant messages to backend session
+      // Persist user + assistant messages to backend session BEFORE clearing sending state
       if (finalContent) {
-        persistMessages([
+        await persistMessages([
           { role: "user", content: text },
           { role: "assistant", content: finalContent },
         ]);
       }
+      setSending(false);
     }
   }, [input, sending, orgId, nodeId, apiBaseUrl, persistMessages]);
 
