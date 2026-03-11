@@ -2306,10 +2306,6 @@ button:disabled {
 }
 
 @media (max-width: 980px) {
-  .appShell {
-    grid-template-columns: 1fr;
-    height: auto;
-  }
   .imView {
     grid-template-columns: 1fr;
   }
