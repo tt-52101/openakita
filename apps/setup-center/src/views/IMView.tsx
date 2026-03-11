@@ -134,10 +134,12 @@ export function IMView({
   serviceRunning,
   multiAgentEnabled = false,
   apiBaseUrl,
+  onRequestRestart,
 }: {
   serviceRunning: boolean;
   multiAgentEnabled?: boolean;
   apiBaseUrl?: string;
+  onRequestRestart?: () => void;
 }) {
   const { t } = useTranslation();
   const api = apiBaseUrl ?? DEFAULT_API;
@@ -562,6 +564,46 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
       closeEditor();
       fetchBots();
       showToast(t("im.botSaveSuccess"), "ok");
+    } catch (e) {
+      showToast(String(e) || t("im.botSaveFailed"), "err");
+    }
+    setSaving(false);
+  };
+
+  const handleSaveAndRestart = async () => {
+    if (!editingBot.id.trim()) return;
+    setSaving(true);
+    try {
+      const url = isCreating
+        ? `${apiBase}/api/agents/bots`
+        : `${apiBase}/api/agents/bots/${editingBot.id}`;
+      const method = isCreating ? "POST" : "PUT";
+      const payload = isCreating
+        ? {
+            id: editingBot.id,
+            type: editingBot.type,
+            name: editingBot.name,
+            agent_profile_id: editingBot.agent_profile_id,
+            enabled: editingBot.enabled,
+            credentials: editingBot.credentials,
+          }
+        : {
+            type: editingBot.type,
+            name: editingBot.name,
+            agent_profile_id: editingBot.agent_profile_id,
+            enabled: editingBot.enabled,
+            credentials: editingBot.credentials,
+          };
+
+      await safeFetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      closeEditor();
+      fetchBots();
+      showToast(t("im.botSaveSuccess"), "ok");
+      onRequestRestart?.();
     } catch (e) {
       showToast(String(e) || t("im.botSaveFailed"), "err");
     }
@@ -1019,7 +1061,20 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
                 fontWeight: 600, opacity: saving || !editingBot.id.trim() ? 0.5 : 1,
               }}
             >
-              {saving ? "..." : t("common.save")}
+              {saving ? "..." : t("im.botSaveOnly")}
+            </button>
+            <button
+              className="btnApplyRestart"
+              onClick={handleSaveAndRestart}
+              disabled={saving || !editingBot.id.trim()}
+              title={t("im.botApplyRestartHint")}
+              style={{
+                padding: "8px 18px", borderRadius: 8, border: "none",
+                color: "#fff", cursor: saving ? "wait" : "pointer", fontSize: 13,
+                fontWeight: 600, opacity: saving || !editingBot.id.trim() ? 0.5 : 1,
+              }}
+            >
+              {saving ? "..." : t("im.botApplyRestart")}
             </button>
           </div>
         </div>

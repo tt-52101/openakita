@@ -728,7 +728,10 @@
     "botDeleteFailed": "Bot delete failed",
     "botConfirmDelete": "Are you sure you want to delete this bot?",
     "botToggleSuccess": "Bot status updated",
-    "needMultiAgent": "Multi-Agent mode required"
+    "needMultiAgent": "Multi-Agent mode required",
+    "botSaveOnly": "Save Only",
+    "botApplyRestart": "Apply & Restart",
+    "botApplyRestartHint": "Save bot config and restart service to apply"
   },
   "llm": {
     "title": "LLM Endpoints",

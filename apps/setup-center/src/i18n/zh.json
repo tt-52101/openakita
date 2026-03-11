@@ -728,7 +728,10 @@
     "botDeleteFailed": "Bot 删除失败",
     "botConfirmDelete": "确定删除此 Bot？",
     "botToggleSuccess": "Bot 状态已更新",
-    "needMultiAgent": "需要开启多Agent模式"
+    "needMultiAgent": "需要开启多Agent模式",
+    "botSaveOnly": "仅保存",
+    "botApplyRestart": "应用并重启",
+    "botApplyRestartHint": "保存 Bot 配置后重启服务使其生效"
   },
   "llm": {
     "title": "LLM 端点",

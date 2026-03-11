@@ -1958,19 +1958,16 @@ export function App() {
   }
 
   /**
-   * 保存 .env 配置后触发服务重启，并轮询等待服务恢复。
-   * 如果服务未运行，仅保存不重启并提示。
+   * 纯重启：安装 IM 依赖 → 检测存活 → 触发重启 → 轮询恢复。
+   * 不含 env 保存逻辑，可独立调用（如 Bot 配置保存后重启）。
    */
-  async function applyAndRestart(keys: string[]): Promise<void> {
+  async function restartService(): Promise<void> {
     const base = httpApiBase();
     setError(null);
-    setRestartOverlay({ phase: "saving" });
+    setRestartOverlay({ phase: "restarting" });
 
     try {
-      // Step 1: 保存配置
-      await saveEnvKeys(keys);
-
-      // Step 1.5: 自动安装已启用 IM 通道缺失的依赖（非阻塞，失败不影响重启）
+      // 自动安装已启用 IM 通道缺失的依赖（非阻塞，失败不影响重启）
       if (IS_TAURI && venvDir && currentWorkspaceId) {
         try {
           await invoke("openakita_ensure_channel_deps", {
@@ -1980,7 +1977,7 @@ export function App() {
         } catch { /* 非关键步骤，失败不影响流程 */ }
       }
 
-      // Step 2: 检测服务是否运行
+      // 检测服务是否运行
       let alive = false;
       try {
         const ping = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(2000) });
@@ -1988,7 +1985,6 @@ export function App() {
       } catch { alive = false; }
 
       if (!alive) {
-        // 服务未运行，仅保存
         setRestartOverlay({ phase: "notRunning" });
         setTimeout(() => {
           setRestartOverlay(null);
@@ -1997,29 +1993,23 @@ export function App() {
         return;
       }
 
-      // Step 3: 触发重启
+      // 触发重启
       setRestartOverlay({ phase: "restarting" });
       const wsId = currentWorkspaceId || workspaces[0]?.id;
 
       if (IS_TAURI && wsId && venvDir && dataMode === "local") {
         // ── Tauri 本地模式：进程级重启（杀旧进程 → 启新进程） ──
-        // 比 Python 进程内重启更可靠，不受 Windows asyncio / 端口 TIME_WAIT 影响。
-
-        // 3a. 优雅关闭服务
         try {
           const shutRes = await fetch(`${base}/api/shutdown`, { method: "POST", signal: AbortSignal.timeout(2000) });
           if (shutRes.ok) await new Promise((r) => setTimeout(r, 1000));
         } catch { /* 请求可能因服务关闭而失败 */ }
 
-        // 3b. PID 级别兜底确保进程退出
         try {
           await invoke("openakita_service_stop", { workspaceId: wsId });
         } catch { /* PID 文件可能不存在 */ }
 
-        // 3c. 等待旧服务完全关闭
         await waitForServiceDown(base, 15000);
 
-        // 3d. 启动新进程
         setRestartOverlay({ phase: "waiting" });
         try {
           const ss = await invoke<{ running: boolean; pid: number | null; pidFile: string }>(
@@ -2040,11 +2030,10 @@ export function App() {
           await fetch(`${base}/api/config/restart`, { method: "POST", signal: AbortSignal.timeout(3000) });
         } catch { /* 请求可能因服务关闭而失败 */ }
 
-        // 等待服务关闭
         await waitForServiceDown(base, 15000);
       }
 
-      // Step 4: 轮询等待服务恢复
+      // 轮询等待服务恢复
       setRestartOverlay({ phase: "waiting" });
       const maxWait = IS_TAURI ? 60_000 : 30_000;
       const pollInterval = 1000;
@@ -2088,6 +2077,23 @@ export function App() {
       setRestartOverlay(null);
       setError(String(e));
     }
+  }
+
+  /**
+   * 保存 .env 配置后触发服务重启，并轮询等待服务恢复。
+   * 如果服务未运行，仅保存不重启并提示。
+   */
+  async function applyAndRestart(keys: string[]): Promise<void> {
+    setError(null);
+    setRestartOverlay({ phase: "saving" });
+    try {
+      await saveEnvKeys(keys);
+    } catch (e) {
+      setRestartOverlay(null);
+      setError(String(e));
+      return;
+    }
+    await restartService();
   }
 
   function normalizePriority(n: any, fallback: number) {
@@ -7574,7 +7580,7 @@ export function App() {
               <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，点击上方开关启用</p>
             </div>
           ) : (
-            <IMView serviceRunning={serviceStatus?.running ?? false} multiAgentEnabled={multiAgentEnabled} apiBaseUrl={apiBaseUrl} />
+            <IMView serviceRunning={serviceStatus?.running ?? false} multiAgentEnabled={multiAgentEnabled} apiBaseUrl={apiBaseUrl} onRequestRestart={restartService} />
           )}
         </div>
       );
