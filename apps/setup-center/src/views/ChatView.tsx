@@ -2722,7 +2722,7 @@ export function ChatView({
         };
 
         setMessages(orgMsgsSnapshot);
-        setInputText("");
+        setInputValue("");
         orgCommandPendingRef.current = true;
         setOrgCommandPending(true);
 
@@ -4053,6 +4053,17 @@ export function ChatView({
     const has = val.trim().length > 0;
     setHasInputText(prev => prev !== has ? has : prev);
 
+    // @org: 前缀检测 — 自动切换到组织模式
+    const orgMatch = val.match(/^@org:(\S+)\s/);
+    if (orgMatch && !orgMode) {
+      const target = orgMatch[1];
+      const match = orgList.find(o => o.name.includes(target) || o.id === target);
+      if (match) {
+        setOrgMode(true);
+        setSelectedOrgId(match.id);
+      }
+    }
+
     if (val.startsWith("/") && !val.includes(" ")) {
       setSlashOpen(true);
       setSlashFilter(val.slice(1));
@@ -4763,8 +4774,8 @@ export function ChatView({
                     </div>
                   );
                 })()}
-                {isCurrentConvStreaming ? (
-                  hasInputText ? (
+                {isCurrentConvStreaming || orgCommandPending ? (
+                  hasInputText && !orgCommandPending ? (
                     <button
                       onClick={handleQueueMessage}
                       className="chatInputSendBtn"
