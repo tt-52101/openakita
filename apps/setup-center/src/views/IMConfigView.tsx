@@ -22,9 +22,9 @@ export function IMConfigView(props: IMConfigViewProps) {
   const _envBase = { envDraft, onEnvChange: setEnvDraft, busy };
   const _secretCtx = { secretShown, onToggleSecret };
   const FT = (p: { k: string; label: string; placeholder?: string; help?: string; type?: "text" | "password" }) =>
-    <FieldText {...p} {..._envBase} {..._secretCtx} />;
+    <FieldText key={p.k} {...p} {..._envBase} {..._secretCtx} />;
   const FB = (p: { k: string; label: string; help?: string; defaultValue?: boolean }) =>
-    <FieldBool {...p} {..._envBase} />;
+    <FieldBool key={p.k} {...p} {..._envBase} />;
 
   const channels = [
     {
@@ -36,12 +36,12 @@ export function IMConfigView(props: IMConfigViewProps) {
       needPublicIp: false,
       body: (
         <>
-          <FT k="TELEGRAM_BOT_TOKEN" label={t("config.imBotToken")} placeholder="BotFather token" type="password" />
-          <FT k="TELEGRAM_PROXY" label={t("config.imProxy")} placeholder="http://127.0.0.1:7890" />
-          <FB k="TELEGRAM_REQUIRE_PAIRING" label={t("config.imPairing")} />
-          <FT k="TELEGRAM_PAIRING_CODE" label={t("config.imPairingCode")} placeholder={t("config.imPairingCodeHint")} />
+          {FT({ k: "TELEGRAM_BOT_TOKEN", label: t("config.imBotToken"), placeholder: "BotFather token", type: "password" })}
+          {FT({ k: "TELEGRAM_PROXY", label: t("config.imProxy"), placeholder: "http://127.0.0.1:7890" })}
+          {FB({ k: "TELEGRAM_REQUIRE_PAIRING", label: t("config.imPairing") })}
+          {FT({ k: "TELEGRAM_PAIRING_CODE", label: t("config.imPairingCode"), placeholder: t("config.imPairingCodeHint") })}
           <TelegramPairingCodeHint currentWorkspaceId={currentWorkspaceId} />
-          <FT k="TELEGRAM_WEBHOOK_URL" label="Webhook URL" placeholder="https://..." />
+          {FT({ k: "TELEGRAM_WEBHOOK_URL", label: "Webhook URL", placeholder: "https://..." })}
         </>
       ),
     },
@@ -54,8 +54,8 @@ export function IMConfigView(props: IMConfigViewProps) {
       needPublicIp: false,
       body: (
         <>
-          <FT k="FEISHU_APP_ID" label="App ID" />
-          <FT k="FEISHU_APP_SECRET" label="App Secret" type="password" />
+          {FT({ k: "FEISHU_APP_ID", label: "App ID" })}
+          {FT({ k: "FEISHU_APP_SECRET", label: "App Secret", type: "password" })}
         </>
       ),
     },
@@ -98,15 +98,15 @@ export function IMConfigView(props: IMConfigViewProps) {
             </div>
             {isWs ? (
               <>
-                <FT k="WEWORK_WS_BOT_ID" label={t("config.imWeworkBotId")} help={t("config.imWeworkBotIdHelp")} />
-                <FT k="WEWORK_WS_SECRET" label={t("config.imWeworkSecret")} type="password" help={t("config.imWeworkSecretHelp")} />
+                {FT({ k: "WEWORK_WS_BOT_ID", label: t("config.imWeworkBotId"), help: t("config.imWeworkBotIdHelp") })}
+                {FT({ k: "WEWORK_WS_SECRET", label: t("config.imWeworkSecret"), type: "password", help: t("config.imWeworkSecretHelp") })}
               </>
             ) : (
               <>
-                <FT k="WEWORK_CORP_ID" label="Corp ID" help={t("config.imWeworkCorpIdHelp")} />
-                <FT k="WEWORK_TOKEN" label="Callback Token" help={t("config.imWeworkTokenHelp")} />
-                <FT k="WEWORK_ENCODING_AES_KEY" label="EncodingAESKey" type="password" help={t("config.imWeworkAesKeyHelp")} />
-                <FT k="WEWORK_CALLBACK_PORT" label={t("config.imCallbackPort")} placeholder="9880" />
+                {FT({ k: "WEWORK_CORP_ID", label: "Corp ID", help: t("config.imWeworkCorpIdHelp") })}
+                {FT({ k: "WEWORK_TOKEN", label: "Callback Token", help: t("config.imWeworkTokenHelp") })}
+                {FT({ k: "WEWORK_ENCODING_AES_KEY", label: "EncodingAESKey", type: "password", help: t("config.imWeworkAesKeyHelp") })}
+                {FT({ k: "WEWORK_CALLBACK_PORT", label: t("config.imCallbackPort"), placeholder: "9880" })}
                 <div className="fieldHint" style={{ fontSize: 12, color: "var(--text3)", margin: "4px 0 0 0", lineHeight: 1.6 }}>
                   {t("config.imWeworkCallbackUrlHint")}<code style={{ background: "var(--bg2)", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>http://your-domain:9880/callback</code>
                 </div>
@@ -125,8 +125,8 @@ export function IMConfigView(props: IMConfigViewProps) {
       needPublicIp: false,
       body: (
         <>
-          <FT k="DINGTALK_CLIENT_ID" label="Client ID" />
-          <FT k="DINGTALK_CLIENT_SECRET" label="Client Secret" type="password" />
+          {FT({ k: "DINGTALK_CLIENT_ID", label: "Client ID" })}
+          {FT({ k: "DINGTALK_CLIENT_SECRET", label: "Client Secret", type: "password" })}
         </>
       ),
     },
@@ -139,9 +139,9 @@ export function IMConfigView(props: IMConfigViewProps) {
       needPublicIp: false,
       body: (
         <>
-          <FT k="QQBOT_APP_ID" label="AppID" placeholder="q.qq.com 开发设置" />
-          <FT k="QQBOT_APP_SECRET" label="AppSecret" type="password" placeholder="q.qq.com 开发设置" />
-          <FB k="QQBOT_SANDBOX" label={t("config.imQQBotSandbox")} />
+          {FT({ k: "QQBOT_APP_ID", label: "AppID", placeholder: "q.qq.com 开发设置" })}
+          {FT({ k: "QQBOT_APP_SECRET", label: "AppSecret", type: "password", placeholder: "q.qq.com 开发设置" })}
+          {FB({ k: "QQBOT_SANDBOX", label: t("config.imQQBotSandbox") })}
           <div style={{ marginTop: 8 }}>
             <div className="label">{t("config.imQQBotMode")}</div>
             <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
@@ -158,8 +158,8 @@ export function IMConfigView(props: IMConfigViewProps) {
           </div>
           {(envDraft["QQBOT_MODE"] === "webhook") && (
             <>
-              <FT k="QQBOT_WEBHOOK_PORT" label={t("config.imQQBotWebhookPort")} placeholder="9890" />
-              <FT k="QQBOT_WEBHOOK_PATH" label={t("config.imQQBotWebhookPath")} placeholder="/qqbot/callback" />
+              {FT({ k: "QQBOT_WEBHOOK_PORT", label: t("config.imQQBotWebhookPort"), placeholder: "9890" })}
+              {FT({ k: "QQBOT_WEBHOOK_PATH", label: t("config.imQQBotWebhookPath"), placeholder: "/qqbot/callback" })}
             </>
           )}
         </>
@@ -192,13 +192,13 @@ export function IMConfigView(props: IMConfigViewProps) {
             </div>
             {isReverse ? (
               <>
-                <FT k="ONEBOT_REVERSE_HOST" label={t("config.imOneBotReverseHost")} placeholder="0.0.0.0" />
-                <FT k="ONEBOT_REVERSE_PORT" label={t("config.imOneBotReversePort")} placeholder="6700" />
+                {FT({ k: "ONEBOT_REVERSE_HOST", label: t("config.imOneBotReverseHost"), placeholder: "0.0.0.0" })}
+                {FT({ k: "ONEBOT_REVERSE_PORT", label: t("config.imOneBotReversePort"), placeholder: "6700" })}
               </>
             ) : (
-              <FT k="ONEBOT_WS_URL" label="WebSocket URL" placeholder="ws://127.0.0.1:8080" />
+              FT({ k: "ONEBOT_WS_URL", label: "WebSocket URL", placeholder: "ws://127.0.0.1:8080" })
             )}
-            <FT k="ONEBOT_ACCESS_TOKEN" label="Access Token" type="password" placeholder={t("config.imOneBotTokenHint")} />
+            {FT({ k: "ONEBOT_ACCESS_TOKEN", label: "Access Token", type: "password", placeholder: t("config.imOneBotTokenHint") })}
           </>
         ),
       };
@@ -218,7 +218,7 @@ export function IMConfigView(props: IMConfigViewProps) {
         <div className="cardHint">{t("config.imHint")}</div>
         <div className="divider" />
 
-        <FB k="IM_CHAIN_PUSH" label={t("config.imChainPush")} help={t("config.imChainPushHelp")} />
+        {FB({ k: "IM_CHAIN_PUSH", label: t("config.imChainPush"), help: t("config.imChainPushHelp") })}
         <div className="divider" />
 
         {channels.map((c) => {

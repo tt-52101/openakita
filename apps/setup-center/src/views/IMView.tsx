@@ -121,8 +121,6 @@ const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; secret?: b
   qqbot: [
     { key: "app_id", label: "App ID" },
     { key: "app_secret", label: "App Secret", secret: true },
-    { key: "sandbox", label: "Sandbox (true/false)" },
-    { key: "mode", label: "Mode (websocket/webhook)" },
   ],
 };
 
@@ -287,7 +285,7 @@ export function IMView({
         {tab === "messages" ? (
           <MessagesTab serviceRunning={serviceRunning} apiBase={api} />
         ) : (
-          <BotConfigTab apiBase={api} multiAgentEnabled={multiAgentEnabled} />
+          <BotConfigTab apiBase={api} multiAgentEnabled={multiAgentEnabled} onRequestRestart={onRequestRestart} />
         )}
       </div>
     </div>
@@ -477,7 +475,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
 
 // ─── Bot Configuration Tab ──────────────────────────────────────────────
 
-function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAgentEnabled: boolean }) {
+function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart }: { apiBase: string; multiAgentEnabled: boolean; onRequestRestart?: () => void }) {
   const { t } = useTranslation();
   const [bots, setBots] = useState<IMBot[]>([]);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
@@ -1077,6 +1075,41 @@ function BotConfigTab({ apiBase, multiAgentEnabled }: { apiBase: string; multiAg
                 </div>
               </label>
             ))}
+
+            {/* QQ Bot: sandbox checkbox + mode toggle */}
+            {editingBot.type === "qqbot" && (
+              <>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={editingBot.credentials.sandbox === "true" || editingBot.credentials.sandbox === true}
+                    onChange={(e) => updateCredential("sandbox", e.target.checked ? "true" : "false")}
+                    style={{ width: 16, height: 16 }}
+                  />
+                  <span style={{ fontSize: 12 }}>{t("config.imQQBotSandbox")}</span>
+                </label>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 4 }}>{t("config.imQQBotMode")}</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {["websocket", "webhook"].map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        className={(String(editingBot.credentials.mode || "websocket")) === m ? "capChipActive" : "capChip"}
+                        onClick={() => updateCredential("mode", m)}
+                      >
+                        {m === "websocket" ? "WebSocket" : "Webhook"}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                    {(String(editingBot.credentials.mode || "websocket")) === "websocket"
+                      ? t("config.imQQBotModeWsHint")
+                      : t("config.imQQBotModeWhHint")}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Editor footer */}

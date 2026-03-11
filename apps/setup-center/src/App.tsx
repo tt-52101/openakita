@@ -5030,13 +5030,13 @@ export function App() {
   const _envBase = { envDraft, onEnvChange: setEnvDraft, busy };
   const _secretCtx = { secretShown, onToggleSecret: (k: string) => setSecretShown((m: Record<string, boolean>) => ({ ...m, [k]: !m[k] })) };
   const FT = (p: { k: string; label: string; placeholder?: string; help?: string; type?: "text" | "password" }) =>
-    <FieldText {...p} {..._envBase} {..._secretCtx} />;
+    <FieldText key={p.k} {...p} {..._envBase} {..._secretCtx} />;
   const FB = (p: { k: string; label: string; help?: string; defaultValue?: boolean }) =>
-    <FieldBool {...p} {..._envBase} />;
+    <FieldBool key={p.k} {...p} {..._envBase} />;
   const FS = (p: { k: string; label: string; options: { value: string; label: string }[]; help?: string }) =>
-    <FieldSelect {...p} {..._envBase} />;
+    <FieldSelect key={p.k} {...p} {..._envBase} />;
   const FC = (p: { k: string; label: string; options: { value: string; label: string }[]; placeholder?: string; help?: string }) =>
-    <FieldCombo {...p} {..._envBase} />;
+    <FieldCombo key={p.k} {...p} {..._envBase} />;
 
   async function renderIntegrationsSave(keys: string[], successText: string) {
     if (!currentWorkspaceId) { setError(t("common.error")); return; }
@@ -5092,22 +5092,22 @@ export function App() {
           <details className="configDetails" open>
             <summary>{t("config.toolsMCP")}</summary>
             <div className="configDetailsBody">
-              <FB k="MCP_ENABLED" label={t("config.toolsMCPEnable")} help={t("config.toolsMCPEnableHelp")} />
+              {FB({ k: "MCP_ENABLED", label: t("config.toolsMCPEnable"), help: t("config.toolsMCPEnableHelp") })}
               <div className="grid2">
-                <FB k="MCP_BROWSER_ENABLED" label="Browser MCP" help={t("config.toolsMCPBrowserHelp")} />
-                <FT k="MCP_TIMEOUT" label="Timeout (s)" placeholder="60" />
+                {FB({ k: "MCP_BROWSER_ENABLED", label: "Browser MCP", help: t("config.toolsMCPBrowserHelp") })}
+                {FT({ k: "MCP_TIMEOUT", label: "Timeout (s)", placeholder: "60" })}
               </div>
               <div className="divider" />
-              <FB k="MCP_MYSQL_ENABLED" label="MySQL" />
+              {FB({ k: "MCP_MYSQL_ENABLED", label: "MySQL" })}
               <div className="grid2">
-                <FT k="MCP_MYSQL_HOST" label="Host" placeholder="localhost" />
-                <FT k="MCP_MYSQL_USER" label="User" placeholder="root" />
-                <FT k="MCP_MYSQL_PASSWORD" label="Password" type="password" />
-                <FT k="MCP_MYSQL_DATABASE" label="Database" placeholder="mydb" />
+                {FT({ k: "MCP_MYSQL_HOST", label: "Host", placeholder: "localhost" })}
+                {FT({ k: "MCP_MYSQL_USER", label: "User", placeholder: "root" })}
+                {FT({ k: "MCP_MYSQL_PASSWORD", label: "Password", type: "password" })}
+                {FT({ k: "MCP_MYSQL_DATABASE", label: "Database", placeholder: "mydb" })}
               </div>
               <div className="divider" />
-              <FB k="MCP_POSTGRES_ENABLED" label="PostgreSQL" />
-              <FT k="MCP_POSTGRES_URL" label="URL" placeholder="postgresql://user:pass@localhost/db" />
+              {FB({ k: "MCP_POSTGRES_ENABLED", label: "PostgreSQL" })}
+              {FT({ k: "MCP_POSTGRES_URL", label: "URL", placeholder: "postgresql://user:pass@localhost/db" })}
             </div>
           </details>
 
@@ -5115,29 +5115,29 @@ export function App() {
           <details className="configDetails" open>
             <summary>{t("config.toolsDesktop")}</summary>
             <div className="configDetailsBody">
-              <FB k="DESKTOP_ENABLED" label={t("config.toolsDesktopEnable")} help={t("config.toolsDesktopHelp")} />
+              {FB({ k: "DESKTOP_ENABLED", label: t("config.toolsDesktopEnable"), help: t("config.toolsDesktopHelp") })}
               <div className="grid3">
-                <FT k="DESKTOP_DEFAULT_MONITOR" label={t("config.toolsMonitor")} placeholder="0" />
-                <FT k="DESKTOP_MAX_WIDTH" label={t("config.toolsMaxW")} placeholder="1920" />
-                <FT k="DESKTOP_MAX_HEIGHT" label={t("config.toolsMaxH")} placeholder="1080" />
+                {FT({ k: "DESKTOP_DEFAULT_MONITOR", label: t("config.toolsMonitor"), placeholder: "0" })}
+                {FT({ k: "DESKTOP_MAX_WIDTH", label: t("config.toolsMaxW"), placeholder: "1920" })}
+                {FT({ k: "DESKTOP_MAX_HEIGHT", label: t("config.toolsMaxH"), placeholder: "1080" })}
               </div>
               <details className="configDetails">
                 <summary>{t("config.toolsDesktopAdvanced")}</summary>
                 <div className="configDetailsBody">
                   <div className="grid3">
-                    <FT k="DESKTOP_COMPRESSION_QUALITY" label={t("config.toolsCompression")} placeholder="85" />
-                    <FT k="DESKTOP_CACHE_TTL" label="Cache TTL" placeholder="1.0" />
-                    <FB k="DESKTOP_FAILSAFE" label="Failsafe" />
+                    {FT({ k: "DESKTOP_COMPRESSION_QUALITY", label: t("config.toolsCompression"), placeholder: "85" })}
+                    {FT({ k: "DESKTOP_CACHE_TTL", label: "Cache TTL", placeholder: "1.0" })}
+                    {FB({ k: "DESKTOP_FAILSAFE", label: "Failsafe" })}
                   </div>
-                  <FB k="DESKTOP_VISION_ENABLED" label={t("config.toolsVision")} help={t("config.toolsVisionHelp")} />
+                  {FB({ k: "DESKTOP_VISION_ENABLED", label: t("config.toolsVision"), help: t("config.toolsVisionHelp") })}
                   <div className="grid2">
-                    <FT k="DESKTOP_VISION_MODEL" label={t("config.toolsVisionModel")} placeholder="qwen3-vl-plus" />
-                    <FT k="DESKTOP_VISION_OCR_MODEL" label="OCR" placeholder="qwen-vl-ocr" />
+                    {FT({ k: "DESKTOP_VISION_MODEL", label: t("config.toolsVisionModel"), placeholder: "qwen3-vl-plus" })}
+                    {FT({ k: "DESKTOP_VISION_OCR_MODEL", label: "OCR", placeholder: "qwen-vl-ocr" })}
                   </div>
                   <div className="grid3">
-                    <FT k="DESKTOP_CLICK_DELAY" label="Click Delay" placeholder="0.1" />
-                    <FT k="DESKTOP_TYPE_INTERVAL" label="Type Interval" placeholder="0.03" />
-                    <FT k="DESKTOP_MOVE_DURATION" label="Move Duration" placeholder="0.15" />
+                    {FT({ k: "DESKTOP_CLICK_DELAY", label: "Click Delay", placeholder: "0.1" })}
+                    {FT({ k: "DESKTOP_TYPE_INTERVAL", label: "Type Interval", placeholder: "0.03" })}
+                    {FT({ k: "DESKTOP_MOVE_DURATION", label: "Move Duration", placeholder: "0.15" })}
                   </div>
                 </div>
               </details>
@@ -5149,27 +5149,27 @@ export function App() {
             <summary>{t("config.toolsDownloadVoice")}</summary>
             <div className="configDetailsBody">
               <div className="grid2">
-                <FS k="MODEL_DOWNLOAD_SOURCE" label={t("config.agentDownloadSource")} options={[
+                {FS({ k: "MODEL_DOWNLOAD_SOURCE", label: t("config.agentDownloadSource"), options: [
                   { value: "auto", label: "Auto (自动选择最快源)" },
                   { value: "hf-mirror", label: "hf-mirror (国内镜像 🇨🇳)" },
                   { value: "modelscope", label: "ModelScope (魔搭社区 🇨🇳)" },
                   { value: "huggingface", label: "HuggingFace (官方)" },
-                ]} />
-                <FS k="WHISPER_LANGUAGE" label={t("config.toolsWhisperLang")} options={[
+                ] })}
+                {FS({ k: "WHISPER_LANGUAGE", label: t("config.toolsWhisperLang"), options: [
                   { value: "zh", label: "中文 (zh)" },
                   { value: "en", label: "English (en, .en model)" },
                   { value: "auto", label: "Auto (自动检测)" },
-                ]} />
+                ] })}
               </div>
               <div className="grid2">
-                <FC k="WHISPER_MODEL" label={t("config.toolsWhisperModel")} help={t("config.toolsWhisperHelp")} options={[
+                {FC({ k: "WHISPER_MODEL", label: t("config.toolsWhisperModel"), help: t("config.toolsWhisperHelp"), options: [
                   { value: "tiny", label: "tiny (~39MB)" },
                   { value: "base", label: "base (~74MB)" },
                   { value: "small", label: "small (~244MB)" },
                   { value: "medium", label: "medium (~769MB)" },
                   { value: "large", label: "large (~1.5GB)" },
-                ]} placeholder="base" />
-                <FT k="GITHUB_TOKEN" label="GitHub Token" placeholder="" type="password" help={t("config.toolsGithubHelp")} />
+                ], placeholder: "base" })}
+                {FT({ k: "GITHUB_TOKEN", label: "GitHub Token", placeholder: "", type: "password", help: t("config.toolsGithubHelp") })}
               </div>
             </div>
           </details>
@@ -5179,13 +5179,13 @@ export function App() {
             <summary>{t("config.toolsNetwork")}</summary>
             <div className="configDetailsBody">
               <div className="grid3">
-                <FT k="HTTP_PROXY" label="HTTP_PROXY" placeholder="http://127.0.0.1:7890" />
-                <FT k="HTTPS_PROXY" label="HTTPS_PROXY" placeholder="http://127.0.0.1:7890" />
-                <FT k="ALL_PROXY" label="ALL_PROXY" placeholder="socks5://..." />
+                {FT({ k: "HTTP_PROXY", label: "HTTP_PROXY", placeholder: "http://127.0.0.1:7890" })}
+                {FT({ k: "HTTPS_PROXY", label: "HTTPS_PROXY", placeholder: "http://127.0.0.1:7890" })}
+                {FT({ k: "ALL_PROXY", label: "ALL_PROXY", placeholder: "socks5://..." })}
               </div>
               <div className="grid2">
-                <FB k="FORCE_IPV4" label={t("config.toolsForceIPv4")} help={t("config.toolsForceIPv4Help")} />
-                <FT k="TOOL_MAX_PARALLEL" label={t("config.toolsParallel")} placeholder="1" help={t("config.toolsParallelHelp")} />
+                {FB({ k: "FORCE_IPV4", label: t("config.toolsForceIPv4"), help: t("config.toolsForceIPv4Help") })}
+                {FT({ k: "TOOL_MAX_PARALLEL", label: t("config.toolsParallel"), placeholder: "1", help: t("config.toolsParallelHelp") })}
               </div>
             </div>
           </details>
@@ -5195,7 +5195,7 @@ export function App() {
             <summary>{t("config.toolsOther")}</summary>
             <div className="configDetailsBody">
               <div className="grid2">
-                <FT k="FORCE_TOOL_CALL_MAX_RETRIES" label={t("config.toolsForceRetry")} placeholder="1" />
+                {FT({ k: "FORCE_TOOL_CALL_MAX_RETRIES", label: t("config.toolsForceRetry"), placeholder: "1" })}
               </div>
             </div>
           </details>
@@ -6164,14 +6164,14 @@ export function App() {
               网络代理与并行
             </div>
             <div className="grid3">
-              <FT k="HTTP_PROXY" label="HTTP_PROXY" placeholder="http://127.0.0.1:7890" />
-              <FT k="HTTPS_PROXY" label="HTTPS_PROXY" placeholder="http://127.0.0.1:7890" />
-              <FT k="ALL_PROXY" label="ALL_PROXY" placeholder="socks5://127.0.0.1:1080" />
+              {FT({ k: "HTTP_PROXY", label: "HTTP_PROXY", placeholder: "http://127.0.0.1:7890" })}
+              {FT({ k: "HTTPS_PROXY", label: "HTTPS_PROXY", placeholder: "http://127.0.0.1:7890" })}
+              {FT({ k: "ALL_PROXY", label: "ALL_PROXY", placeholder: "socks5://127.0.0.1:1080" })}
             </div>
             <div className="grid3" style={{ marginTop: 10 }}>
-              <FB k="FORCE_IPV4" label="强制 IPv4" help="某些 VPN/IPv6 环境下有用" />
-              <FT k="TOOL_MAX_PARALLEL" label="TOOL_MAX_PARALLEL" placeholder="1" help="单轮多工具并行数（默认 1=串行）" />
-              <FT k="LOG_LEVEL" label="LOG_LEVEL" placeholder="INFO" help="DEBUG/INFO/WARNING/ERROR" />
+              {FB({ k: "FORCE_IPV4", label: "强制 IPv4", help: "某些 VPN/IPv6 环境下有用" })}
+              {FT({ k: "TOOL_MAX_PARALLEL", label: "TOOL_MAX_PARALLEL", placeholder: "1", help: "单轮多工具并行数（默认 1=串行）" })}
+              {FT({ k: "LOG_LEVEL", label: "LOG_LEVEL", placeholder: "INFO", help: "DEBUG/INFO/WARNING/ERROR" })}
             </div>
           </div>
 
@@ -6191,12 +6191,12 @@ export function App() {
                 apply: "https://t.me/BotFather",
                 body: (
                   <>
-                    <FT k="TELEGRAM_BOT_TOKEN" label="Bot Token" placeholder="从 BotFather 获取（仅会显示一次）" type="password" />
-                    <FT k="TELEGRAM_PROXY" label="代理（可选）" placeholder="http://127.0.0.1:7890 / socks5://..." />
-                    <FB k="TELEGRAM_REQUIRE_PAIRING" label={t("config.imPairing")} />
-                    <FT k="TELEGRAM_PAIRING_CODE" label={t("config.imPairingCode")} placeholder={t("config.imPairingCodeHint")} />
+                    {FT({ k: "TELEGRAM_BOT_TOKEN", label: "Bot Token", placeholder: "从 BotFather 获取（仅会显示一次）", type: "password" })}
+                    {FT({ k: "TELEGRAM_PROXY", label: "代理（可选）", placeholder: "http://127.0.0.1:7890 / socks5://..." })}
+                    {FB({ k: "TELEGRAM_REQUIRE_PAIRING", label: t("config.imPairing") })}
+                    {FT({ k: "TELEGRAM_PAIRING_CODE", label: t("config.imPairingCode"), placeholder: t("config.imPairingCodeHint") })}
                     <TelegramPairingCodeHint currentWorkspaceId={currentWorkspaceId} />
-                    <FT k="TELEGRAM_WEBHOOK_URL" label="Webhook URL" placeholder="https://..." />
+                    {FT({ k: "TELEGRAM_WEBHOOK_URL", label: "Webhook URL", placeholder: "https://..." })}
                   </>
                 ),
               },
@@ -6206,8 +6206,8 @@ export function App() {
                 apply: "https://open.feishu.cn/",
                 body: (
                   <>
-                    <FT k="FEISHU_APP_ID" label="App ID" placeholder="" />
-                    <FT k="FEISHU_APP_SECRET" label="App Secret" placeholder="" type="password" />
+                    {FT({ k: "FEISHU_APP_ID", label: "App ID", placeholder: "" })}
+                    {FT({ k: "FEISHU_APP_SECRET", label: "App Secret", placeholder: "", type: "password" })}
                   </>
                 ),
               },
@@ -6247,15 +6247,15 @@ export function App() {
                       </div>
                       {isWs ? (
                         <>
-                          <FT k="WEWORK_WS_BOT_ID" label={t("config.imWeworkBotId")} />
-                          <FT k="WEWORK_WS_SECRET" label={t("config.imWeworkSecret")} type="password" />
+                          {FT({ k: "WEWORK_WS_BOT_ID", label: t("config.imWeworkBotId") })}
+                          {FT({ k: "WEWORK_WS_SECRET", label: t("config.imWeworkSecret"), type: "password" })}
                         </>
                       ) : (
                         <>
-                          <FT k="WEWORK_CORP_ID" label="Corp ID" />
-                          <FT k="WEWORK_TOKEN" label="回调 Token" placeholder="在企业微信后台「接收消息」设置中获取" />
-                          <FT k="WEWORK_ENCODING_AES_KEY" label="EncodingAESKey" placeholder="在企业微信后台「接收消息」设置中获取" type="password" />
-                          <FT k="WEWORK_CALLBACK_PORT" label="回调端口" placeholder="9880" />
+                          {FT({ k: "WEWORK_CORP_ID", label: "Corp ID" })}
+                          {FT({ k: "WEWORK_TOKEN", label: "回调 Token", placeholder: "在企业微信后台「接收消息」设置中获取" })}
+                          {FT({ k: "WEWORK_ENCODING_AES_KEY", label: "EncodingAESKey", placeholder: "在企业微信后台「接收消息」设置中获取", type: "password" })}
+                          {FT({ k: "WEWORK_CALLBACK_PORT", label: "回调端口", placeholder: "9880" })}
                           <div style={{ fontSize: 12, color: "var(--muted)", margin: "4px 0 0 0", lineHeight: 1.6 }}>
                             💡 企业微信后台「接收消息服务器配置」的 URL 请填：<code style={{ background: "#f5f5f5", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>http://your-domain:9880/callback</code>
                           </div>
@@ -6271,8 +6271,8 @@ export function App() {
                 apply: "https://open.dingtalk.com/",
                 body: (
                   <>
-                    <FT k="DINGTALK_CLIENT_ID" label="Client ID" />
-                    <FT k="DINGTALK_CLIENT_SECRET" label="Client Secret" type="password" />
+                    {FT({ k: "DINGTALK_CLIENT_ID", label: "Client ID" })}
+                    {FT({ k: "DINGTALK_CLIENT_SECRET", label: "Client Secret", type: "password" })}
                   </>
                 ),
               },
@@ -6282,9 +6282,9 @@ export function App() {
                 apply: "https://bot.q.qq.com/wiki/develop/api-v2/",
                 body: (
                   <>
-                    <FT k="QQBOT_APP_ID" label="AppID" placeholder="q.qq.com 开发设置" />
-                    <FT k="QQBOT_APP_SECRET" label="AppSecret" type="password" placeholder="q.qq.com 开发设置" />
-                    <FB k="QQBOT_SANDBOX" label={t("config.imQQBotSandbox")} />
+                    {FT({ k: "QQBOT_APP_ID", label: "AppID", placeholder: "q.qq.com 开发设置" })}
+                    {FT({ k: "QQBOT_APP_SECRET", label: "AppSecret", type: "password", placeholder: "q.qq.com 开发设置" })}
+                    {FB({ k: "QQBOT_SANDBOX", label: t("config.imQQBotSandbox") })}
                     <div style={{ marginTop: 8 }}>
                       <div className="label">{t("config.imQQBotMode")}</div>
                       <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
@@ -6301,8 +6301,8 @@ export function App() {
                     </div>
                     {(envDraft["QQBOT_MODE"] === "webhook") && (
                       <>
-                        <FT k="QQBOT_WEBHOOK_PORT" label={t("config.imQQBotWebhookPort")} placeholder="9890" />
-                        <FT k="QQBOT_WEBHOOK_PATH" label={t("config.imQQBotWebhookPath")} placeholder="/qqbot/callback" />
+                        {FT({ k: "QQBOT_WEBHOOK_PORT", label: t("config.imQQBotWebhookPort"), placeholder: "9890" })}
+                        {FT({ k: "QQBOT_WEBHOOK_PATH", label: t("config.imQQBotWebhookPath"), placeholder: "/qqbot/callback" })}
                       </>
                     )}
                   </>
@@ -6332,13 +6332,13 @@ export function App() {
                       </div>
                       {isReverse ? (
                         <>
-                          <FT k="ONEBOT_REVERSE_HOST" label={t("config.imOneBotReverseHost")} placeholder="0.0.0.0" />
-                          <FT k="ONEBOT_REVERSE_PORT" label={t("config.imOneBotReversePort")} placeholder="6700" />
+                          {FT({ k: "ONEBOT_REVERSE_HOST", label: t("config.imOneBotReverseHost"), placeholder: "0.0.0.0" })}
+                          {FT({ k: "ONEBOT_REVERSE_PORT", label: t("config.imOneBotReversePort"), placeholder: "6700" })}
                         </>
                       ) : (
-                        <FT k="ONEBOT_WS_URL" label="WebSocket URL" placeholder="ws://127.0.0.1:8080" />
+                        FT({ k: "ONEBOT_WS_URL", label: "WebSocket URL", placeholder: "ws://127.0.0.1:8080" })
                       )}
-                      <FT k="ONEBOT_ACCESS_TOKEN" label="Access Token" type="password" placeholder={t("config.imOneBotTokenHint")} />
+                      {FT({ k: "ONEBOT_ACCESS_TOKEN", label: "Access Token", type: "password", placeholder: t("config.imOneBotTokenHint") })}
                     </>
                   ),
                 };
@@ -6388,70 +6388,70 @@ export function App() {
                 <div className="label" style={{ marginBottom: 8 }}>
                   MCP
                 </div>
-                <FB k="MCP_ENABLED" label="启用 MCP" help="连接外部 MCP 服务/工具" />
+                {FB({ k: "MCP_ENABLED", label: "启用 MCP", help: "连接外部 MCP 服务/工具" })}
                 <div className="grid2" style={{ marginTop: 10 }}>
-                  <FB k="MCP_BROWSER_ENABLED" label="Browser MCP" help="Playwright 浏览器自动化" />
-                  <FT k="MCP_TIMEOUT" label="MCP_TIMEOUT" placeholder="60" />
+                  {FB({ k: "MCP_BROWSER_ENABLED", label: "Browser MCP", help: "Playwright 浏览器自动化" })}
+                  {FT({ k: "MCP_TIMEOUT", label: "MCP_TIMEOUT", placeholder: "60" })}
                 </div>
                 <div className="divider" />
-                <FB k="MCP_MYSQL_ENABLED" label="MySQL MCP" />
+                {FB({ k: "MCP_MYSQL_ENABLED", label: "MySQL MCP" })}
                 <div className="grid2" style={{ marginTop: 10 }}>
-                  <FT k="MCP_MYSQL_HOST" label="MCP_MYSQL_HOST" placeholder="localhost" />
-                  <FT k="MCP_MYSQL_USER" label="MCP_MYSQL_USER" placeholder="root" />
-                  <FT k="MCP_MYSQL_PASSWORD" label="MCP_MYSQL_PASSWORD" type="password" />
-                  <FT k="MCP_MYSQL_DATABASE" label="MCP_MYSQL_DATABASE" placeholder="mydb" />
+                  {FT({ k: "MCP_MYSQL_HOST", label: "MCP_MYSQL_HOST", placeholder: "localhost" })}
+                  {FT({ k: "MCP_MYSQL_USER", label: "MCP_MYSQL_USER", placeholder: "root" })}
+                  {FT({ k: "MCP_MYSQL_PASSWORD", label: "MCP_MYSQL_PASSWORD", type: "password" })}
+                  {FT({ k: "MCP_MYSQL_DATABASE", label: "MCP_MYSQL_DATABASE", placeholder: "mydb" })}
                 </div>
                 <div className="divider" />
-                <FB k="MCP_POSTGRES_ENABLED" label="Postgres MCP" />
-                <FT k="MCP_POSTGRES_URL" label="MCP_POSTGRES_URL" placeholder="postgresql://user:pass@localhost/db" />
+                {FB({ k: "MCP_POSTGRES_ENABLED", label: "Postgres MCP" })}
+                {FT({ k: "MCP_POSTGRES_URL", label: "MCP_POSTGRES_URL", placeholder: "postgresql://user:pass@localhost/db" })}
               </div>
 
               <div className="card" style={{ marginTop: 0 }}>
                 <div className="label" style={{ marginBottom: 8 }}>
                   桌面自动化（Windows）
                 </div>
-                <FB k="DESKTOP_ENABLED" label="启用桌面工具" help="启用/禁用桌面自动化工具集" />
+                {FB({ k: "DESKTOP_ENABLED", label: "启用桌面工具", help: "启用/禁用桌面自动化工具集" })}
                 <div className="divider" />
                 <div className="grid3">
-                  <FT k="DESKTOP_DEFAULT_MONITOR" label="默认显示器" placeholder="0" />
-                  <FT k="DESKTOP_MAX_WIDTH" label="最大宽" placeholder="1920" />
-                  <FT k="DESKTOP_MAX_HEIGHT" label="最大高" placeholder="1080" />
+                  {FT({ k: "DESKTOP_DEFAULT_MONITOR", label: "默认显示器", placeholder: "0" })}
+                  {FT({ k: "DESKTOP_MAX_WIDTH", label: "最大宽", placeholder: "1920" })}
+                  {FT({ k: "DESKTOP_MAX_HEIGHT", label: "最大高", placeholder: "1080" })}
                 </div>
                 <div className="grid3" style={{ marginTop: 10 }}>
-                  <FT k="DESKTOP_COMPRESSION_QUALITY" label="压缩质量" placeholder="85" />
-                  <FT k="DESKTOP_CACHE_TTL" label="截图缓存秒" placeholder="1.0" />
-                  <FB k="DESKTOP_FAILSAFE" label="failsafe" help="鼠标移到角落中止（PyAutoGUI 风格）" />
+                  {FT({ k: "DESKTOP_COMPRESSION_QUALITY", label: "压缩质量", placeholder: "85" })}
+                  {FT({ k: "DESKTOP_CACHE_TTL", label: "截图缓存秒", placeholder: "1.0" })}
+                  {FB({ k: "DESKTOP_FAILSAFE", label: "failsafe", help: "鼠标移到角落中止（PyAutoGUI 风格）" })}
                 </div>
                 <div className="divider" />
-                <FB k="DESKTOP_VISION_ENABLED" label="启用视觉" help="用于屏幕理解/定位" />
+                {FB({ k: "DESKTOP_VISION_ENABLED", label: "启用视觉", help: "用于屏幕理解/定位" })}
                 <div className="grid2" style={{ marginTop: 10 }}>
-                  <FT k="DESKTOP_VISION_MODEL" label="视觉模型" placeholder="qwen3-vl-plus" />
-                  <FT k="DESKTOP_VISION_OCR_MODEL" label="OCR 模型" placeholder="qwen-vl-ocr" />
+                  {FT({ k: "DESKTOP_VISION_MODEL", label: "视觉模型", placeholder: "qwen3-vl-plus" })}
+                  {FT({ k: "DESKTOP_VISION_OCR_MODEL", label: "OCR 模型", placeholder: "qwen-vl-ocr" })}
                 </div>
                 <div className="grid3" style={{ marginTop: 10 }}>
-                  <FT k="DESKTOP_CLICK_DELAY" label="click_delay" placeholder="0.1" />
-                  <FT k="DESKTOP_TYPE_INTERVAL" label="type_interval" placeholder="0.03" />
-                  <FT k="DESKTOP_MOVE_DURATION" label="move_duration" placeholder="0.15" />
+                  {FT({ k: "DESKTOP_CLICK_DELAY", label: "click_delay", placeholder: "0.1" })}
+                  {FT({ k: "DESKTOP_TYPE_INTERVAL", label: "type_interval", placeholder: "0.03" })}
+                  {FT({ k: "DESKTOP_MOVE_DURATION", label: "move_duration", placeholder: "0.15" })}
                 </div>
               </div>
             </div>
 
             <div className="divider" />
             <div className="grid3">
-              <FC k="WHISPER_MODEL" label="WHISPER_MODEL" help="tiny/base/small/medium/large" options={[
+              {FC({ k: "WHISPER_MODEL", label: "WHISPER_MODEL", help: "tiny/base/small/medium/large", options: [
                 { value: "tiny", label: "tiny (~39MB)" },
                 { value: "base", label: "base (~74MB)" },
                 { value: "small", label: "small (~244MB)" },
                 { value: "medium", label: "medium (~769MB)" },
                 { value: "large", label: "large (~1.5GB)" },
-              ]} placeholder="base" />
-              <FS k="WHISPER_LANGUAGE" label="WHISPER_LANGUAGE" options={[
+              ], placeholder: "base" })}
+              {FS({ k: "WHISPER_LANGUAGE", label: "WHISPER_LANGUAGE", options: [
                 { value: "zh", label: "中文 (zh)" },
                 { value: "en", label: "English (en)" },
                 { value: "auto", label: "Auto (自动检测)" },
-              ]} />
-              <FT k="GITHUB_TOKEN" label="GITHUB_TOKEN" placeholder="" type="password" help="用于搜索/下载技能" />
-              <FT k="DATABASE_PATH" label="DATABASE_PATH" placeholder="data/agent.db" />
+              ] })}
+              {FT({ k: "GITHUB_TOKEN", label: "GITHUB_TOKEN", placeholder: "", type: "password", help: "用于搜索/下载技能" })}
+              {FT({ k: "DATABASE_PATH", label: "DATABASE_PATH", placeholder: "data/agent.db" })}
             </div>
           </div>
 
@@ -6467,21 +6467,21 @@ export function App() {
             <details open>
               <summary style={{ cursor: "pointer", fontWeight: 800, padding: "8px 0" }}>基础</summary>
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
-                <FT k="AGENT_NAME" label="Agent 名称" placeholder="OpenAkita" />
-                <FT k="MAX_ITERATIONS" label="最大迭代次数" placeholder="300" />
-                <FB k="AUTO_CONFIRM" label="自动确认（慎用）" help="打开后会减少交互确认，建议只在可信环境中使用" />
-                <FS k="THINKING_MODE" label="Thinking 模式" options={[
+                {FT({ k: "AGENT_NAME", label: "Agent 名称", placeholder: "OpenAkita" })}
+                {FT({ k: "MAX_ITERATIONS", label: "最大迭代次数", placeholder: "300" })}
+                {FB({ k: "AUTO_CONFIRM", label: "自动确认（慎用）", help: "打开后会减少交互确认，建议只在可信环境中使用" })}
+                {FS({ k: "THINKING_MODE", label: "Thinking 模式", options: [
                   { value: "auto", label: "auto (自动判断)" },
                   { value: "always", label: "always (始终思考)" },
                   { value: "never", label: "never (从不思考)" },
-                ]} />
-                <FT k="DATABASE_PATH" label="数据库路径" placeholder="data/agent.db" />
-                <FS k="LOG_LEVEL" label="日志级别" options={[
+                ] })}
+                {FT({ k: "DATABASE_PATH", label: "数据库路径", placeholder: "data/agent.db" })}
+                {FS({ k: "LOG_LEVEL", label: "日志级别", options: [
                   { value: "DEBUG", label: "DEBUG" },
                   { value: "INFO", label: "INFO" },
                   { value: "WARNING", label: "WARNING" },
                   { value: "ERROR", label: "ERROR" },
-                ]} />
+                ] })}
               </div>
             </details>
 
@@ -6489,14 +6489,14 @@ export function App() {
             <details>
               <summary style={{ cursor: "pointer", fontWeight: 800, padding: "8px 0" }}>日志高级</summary>
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
-                <FT k="LOG_DIR" label="日志目录" placeholder="logs" />
-                <FT k="LOG_FILE_PREFIX" label="日志文件前缀" placeholder="openakita" />
-                <FT k="LOG_MAX_SIZE_MB" label="单文件最大 MB" placeholder="10" />
-                <FT k="LOG_BACKUP_COUNT" label="备份文件数" placeholder="30" />
-                <FT k="LOG_RETENTION_DAYS" label="保留天数" placeholder="30" />
-                <FT k="LOG_FORMAT" label="日志格式" placeholder="%(asctime)s - %(name)s - %(levelname)s - %(message)s" />
-                <FB k="LOG_TO_CONSOLE" label="输出到控制台" help="默认 true" />
-                <FB k="LOG_TO_FILE" label="输出到文件" help="默认 true" />
+                {FT({ k: "LOG_DIR", label: "日志目录", placeholder: "logs" })}
+                {FT({ k: "LOG_FILE_PREFIX", label: "日志文件前缀", placeholder: "openakita" })}
+                {FT({ k: "LOG_MAX_SIZE_MB", label: "单文件最大 MB", placeholder: "10" })}
+                {FT({ k: "LOG_BACKUP_COUNT", label: "备份文件数", placeholder: "30" })}
+                {FT({ k: "LOG_RETENTION_DAYS", label: "保留天数", placeholder: "30" })}
+                {FT({ k: "LOG_FORMAT", label: "日志格式", placeholder: "%(asctime)s - %(name)s - %(levelname)s - %(message)s" })}
+                {FB({ k: "LOG_TO_CONSOLE", label: "输出到控制台", help: "默认 true" })}
+                {FB({ k: "LOG_TO_FILE", label: "输出到文件", help: "默认 true" })}
               </div>
             </details>
 
@@ -6504,17 +6504,17 @@ export function App() {
             <details>
               <summary style={{ cursor: "pointer", fontWeight: 800, padding: "8px 0" }}>记忆与 Embedding</summary>
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
-                <FT k="EMBEDDING_MODEL" label="Embedding 模型" placeholder="shibing624/text2vec-base-chinese" />
-                <FT k="EMBEDDING_DEVICE" label="Embedding 设备" placeholder="cpu / cuda" />
-                <FS k="MODEL_DOWNLOAD_SOURCE" label="模型下载源" options={[
+                {FT({ k: "EMBEDDING_MODEL", label: "Embedding 模型", placeholder: "shibing624/text2vec-base-chinese" })}
+                {FT({ k: "EMBEDDING_DEVICE", label: "Embedding 设备", placeholder: "cpu / cuda" })}
+                {FS({ k: "MODEL_DOWNLOAD_SOURCE", label: "模型下载源", options: [
                   { value: "auto", label: "Auto (自动选择)" },
                   { value: "hf-mirror", label: "hf-mirror (国内镜像)" },
                   { value: "modelscope", label: "ModelScope (魔搭)" },
                   { value: "huggingface", label: "HuggingFace (官方)" },
-                ]} />
-                <FT k="MEMORY_HISTORY_DAYS" label="历史保留天数" placeholder="30" />
-                <FT k="MEMORY_MAX_HISTORY_FILES" label="最大历史文件数" placeholder="1000" />
-                <FT k="MEMORY_MAX_HISTORY_SIZE_MB" label="最大历史大小（MB）" placeholder="500" />
+                ] })}
+                {FT({ k: "MEMORY_HISTORY_DAYS", label: "历史保留天数", placeholder: "30" })}
+                {FT({ k: "MEMORY_MAX_HISTORY_FILES", label: "最大历史文件数", placeholder: "1000" })}
+                {FT({ k: "MEMORY_MAX_HISTORY_SIZE_MB", label: "最大历史大小（MB）", placeholder: "500" })}
               </div>
             </details>
 
@@ -6522,9 +6522,9 @@ export function App() {
             <details>
               <summary style={{ cursor: "pointer", fontWeight: 800, padding: "8px 0" }}>会话</summary>
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
-                <FT k="SESSION_TIMEOUT_MINUTES" label="会话超时（分钟）" placeholder="30" />
-                <FT k="SESSION_MAX_HISTORY" label="会话最大历史条数" placeholder="50" />
-                <FT k="SESSION_STORAGE_PATH" label="会话存储路径" placeholder="data/sessions" />
+                {FT({ k: "SESSION_TIMEOUT_MINUTES", label: "会话超时（分钟）", placeholder: "30" })}
+                {FT({ k: "SESSION_MAX_HISTORY", label: "会话最大历史条数", placeholder: "50" })}
+                {FT({ k: "SESSION_STORAGE_PATH", label: "会话存储路径", placeholder: "data/sessions" })}
               </div>
             </details>
 
@@ -6541,9 +6541,9 @@ export function App() {
                   />
                   启用定时任务调度器（推荐）
                 </label>
-                <FT k="SCHEDULER_TIMEZONE" label="时区" placeholder="Asia/Shanghai" />
-                <FT k="SCHEDULER_MAX_CONCURRENT" label="最大并发任务数" placeholder="5" />
-                <FT k="SCHEDULER_TASK_TIMEOUT" label="任务超时（秒）" placeholder="600" />
+                {FT({ k: "SCHEDULER_TIMEZONE", label: "时区", placeholder: "Asia/Shanghai" })}
+                {FT({ k: "SCHEDULER_MAX_CONCURRENT", label: "最大并发任务数", placeholder: "5" })}
+                {FT({ k: "SCHEDULER_TASK_TIMEOUT", label: "任务超时（秒）", placeholder: "600" })}
               </div>
             </details>
 

@@ -174,6 +174,60 @@ def ensure_whisper_compatible(audio_path: str) -> str:
     return audio_path
 
 
+def load_wav_as_numpy(wav_path: str, target_sr: int = 16000):
+    """直接加载 WAV 为 Whisper 兼容的 float32 numpy 数组，无需 ffmpeg。
+
+    Whisper.transcribe() 接受 numpy 数组时跳过内部 load_audio()（即跳过 ffmpeg）。
+
+    Args:
+        wav_path: WAV 文件路径
+        target_sr: 目标采样率（Whisper 默认 16000Hz）
+
+    Returns:
+        numpy float32 数组（单声道, [-1, 1]），如果加载失败返回 None
+    """
+    import wave
+
+    try:
+        import numpy as np
+    except ImportError:
+        logger.warning("numpy not available, cannot load WAV directly")
+        return None
+
+    try:
+        with wave.open(wav_path, "rb") as wf:
+            sr = wf.getframerate()
+            n_channels = wf.getnchannels()
+            sample_width = wf.getsampwidth()
+            frames = wf.readframes(wf.getnframes())
+
+        if sample_width != 2:
+            logger.debug(f"WAV sample_width={sample_width}, expected 2 (16-bit)")
+            return None
+
+        audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+
+        if n_channels > 1:
+            audio = audio.reshape(-1, n_channels).mean(axis=1)
+
+        if sr != target_sr:
+            n_samples = int(len(audio) * target_sr / sr)
+            audio = np.interp(
+                np.linspace(0, len(audio), n_samples, endpoint=False),
+                np.arange(len(audio)),
+                audio,
+            ).astype(np.float32)
+
+        logger.debug(
+            f"WAV loaded as numpy: {Path(wav_path).name}, "
+            f"sr={sr}→{target_sr}, samples={len(audio)}"
+        )
+        return audio
+    except Exception as e:
+        logger.warning(f"Failed to load WAV as numpy: {e}")
+        return None
+
+
 def ensure_llm_compatible(audio_path: str, target_format: str = "wav") -> str:
     """
     确保音频文件可被 LLM 原生音频输入处理。

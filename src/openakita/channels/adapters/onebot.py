@@ -105,6 +105,9 @@ class OneBotAdapter(ChannelAdapter):
         self._seen_message_ids: OrderedDict[str, None] = OrderedDict()
         self._SEEN_CAPACITY = 500
 
+        # chat_id → chat_type 映射（send_typing 需要区分群/私聊）
+        self._chat_type_map: dict[str, str] = {}
+
     # ==================== 生命周期 ====================
 
     async def start(self) -> None:
@@ -336,6 +339,7 @@ class OneBotAdapter(ChannelAdapter):
             chat_type = "group" if data.get("group_id") else "private"
             chat_id = str(data.get("group_id") or data.get("user_id"))
 
+        self._chat_type_map[chat_id] = chat_type
         is_direct_message = chat_type == "private"
 
         is_mentioned = False
@@ -504,13 +508,17 @@ class OneBotAdapter(ChannelAdapter):
 
         for img in message.content.images:
             if img.local_path:
-                msg_array.append({"type": "image", "data": {"file": f"file:///{img.local_path}"}})
+                normalized = img.local_path.replace("\\", "/")
+                msg_array.append({"type": "image", "data": {"file": f"file:///{normalized}"}})
             elif img.url:
                 msg_array.append({"type": "image", "data": {"file": img.url}})
+            else:
+                logger.warning("OneBot: image has no local_path or url, skipped")
 
         for voice in message.content.voices:
             if voice.local_path:
-                msg_array.append({"type": "record", "data": {"file": f"file:///{voice.local_path}"}})
+                normalized = voice.local_path.replace("\\", "/")
+                msg_array.append({"type": "record", "data": {"file": f"file:///{normalized}"}})
 
         try:
             chat_id = int(message.chat_id)
@@ -531,6 +539,25 @@ class OneBotAdapter(ChannelAdapter):
     async def send_private_message(self, user_id: int, message: str) -> str:
         result = await self._call_api("send_private_msg", {"user_id": user_id, "message": message})
         return str(result.get("message_id", ""))
+
+    async def send_typing(self, chat_id: str, thread_id: str | None = None) -> None:
+        """发送"正在输入"状态（NapCat 扩展 API: set_input_status）。
+
+        非标准 OneBot v11 接口，对其他实现（go-cqhttp 等）会静默失败。
+        """
+        try:
+            chat_id_int = int(chat_id)
+            is_group = self._chat_type_map.get(chat_id, "group") == "group"
+            if is_group:
+                await self._call_api("set_input_status", {
+                    "group_id": chat_id_int, "event_type": "1",
+                })
+            else:
+                await self._call_api("set_input_status", {
+                    "user_id": chat_id_int, "event_type": "1",
+                })
+        except Exception:
+            pass
 
     # ==================== 媒体 ====================
 
@@ -611,10 +638,12 @@ class OneBotAdapter(ChannelAdapter):
             with contextlib.suppress(Exception):
                 await self._call_api(api, {key: chat_id_int, "message": text_msg})
 
+        file_str = str(path.resolve()).replace("\\", "/")
+
         api = "upload_group_file" if _is_grp else "upload_private_file"
         key = "group_id" if _is_grp else "user_id"
         try:
-            result = await self._call_api(api, {key: chat_id_int, "file": str(path.resolve()), "name": path.name})
+            result = await self._call_api(api, {key: chat_id_int, "file": file_str, "name": path.name})
             return str(result.get("message_id", f"file_{chat_id}"))
         except Exception:
             pass
@@ -623,7 +652,7 @@ class OneBotAdapter(ChannelAdapter):
         fallback_key = "user_id" if _is_grp else "group_id"
         try:
             result = await self._call_api(
-                fallback_api, {fallback_key: chat_id_int, "file": str(path.resolve()), "name": path.name}
+                fallback_api, {fallback_key: chat_id_int, "file": file_str, "name": path.name}
             )
             return str(result.get("message_id", f"file_{chat_id}"))
         except Exception as e:
@@ -644,7 +673,8 @@ class OneBotAdapter(ChannelAdapter):
         chat_id_int = int(chat_id)
         _is_grp = is_group if is_group is not None else True
 
-        msg_array = [{"type": "record", "data": {"file": f"file:///{path.resolve()}"}}]
+        normalized = str(path.resolve()).replace("\\", "/")
+        msg_array = [{"type": "record", "data": {"file": f"file:///{normalized}"}}]
 
         api = "send_group_msg" if _is_grp else "send_private_msg"
         key = "group_id" if _is_grp else "user_id"

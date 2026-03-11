@@ -1928,6 +1928,7 @@ class MessageGateway:
             f"text=\"{user_text[:100]}\""
         )
 
+        typing_task: asyncio.Task | None = None
         try:
             # ==================== 群聊响应过滤 ====================
             if message.chat_type == "group" and not message.is_direct_message:
@@ -2056,8 +2057,8 @@ class MessageGateway:
 
             # ==================== 正常消息处理流程 ====================
 
-            # 1. 发送"正在输入"状态
-            await self._send_typing(message)
+            # 1. 启动持续 typing 状态（覆盖预处理 + Agent 全流程）
+            typing_task = asyncio.create_task(self._keep_typing(message))
 
             # 2. 预处理钩子
             for hook in self._pre_process_hooks:
@@ -2159,7 +2160,7 @@ class MessageGateway:
             _notify_im_event("im:new_message", {"channel": message.channel, "role": "user"})
 
             # 6. 调用 Agent 处理（支持中断检查）
-            response_text = await self._call_agent_with_typing(session, message)
+            response_text = await self._call_agent(session, message)
 
             # 7. 后处理钩子
             for hook in self._post_process_hooks:
@@ -2232,6 +2233,15 @@ class MessageGateway:
             # 发送错误提示
             await self._send_error(message, str(e))
         finally:
+            if typing_task is not None:
+                typing_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await typing_task
+            # 清除"思考中"提示消息（QQ 官方等需要撤回文本提示的平台）
+            _adapter = self._adapters.get(message.channel)
+            if _adapter:
+                with contextlib.suppress(Exception):
+                    await _adapter.clear_typing(message.chat_id)
             # 标记会话处理完成
             async with self._interrupt_lock:
                 self._mark_session_processing(session_key, False)
@@ -2263,8 +2273,8 @@ class MessageGateway:
                 )
                 self.session_manager.mark_dirty()  # 触发保存
 
-                # 调用 Agent 处理
-                response_text = await self._call_agent_with_typing(session, interrupt_msg)
+                # 调用 Agent 处理（typing 由外层 typing_task 覆盖）
+                response_text = await self._call_agent(session, interrupt_msg)
 
                 # 后处理钩子
                 for hook in self._post_process_hooks:
@@ -2412,16 +2422,24 @@ class MessageGateway:
             whisper_lang = self._whisper_language
 
             def transcribe():
-                # QQ/微信语音使用 SILK 编码（.amr 扩展名），ffmpeg 不支持
-                # 需要先转换为 WAV 才能被 Whisper 识别
-                from openakita.channels.media.audio_utils import ensure_whisper_compatible
+                from openakita.channels.media.audio_utils import (
+                    ensure_whisper_compatible,
+                    load_wav_as_numpy,
+                )
 
                 compatible_path = ensure_whisper_compatible(audio_path)
 
-                # auto 模式不传 language，让 Whisper 自动检测
                 kwargs = {}
                 if whisper_lang and whisper_lang != "auto":
                     kwargs["language"] = whisper_lang
+
+                # 对已转换的 WAV 尝试直接 numpy 加载，绕过 ffmpeg 依赖
+                if compatible_path.endswith(".wav"):
+                    audio_array = load_wav_as_numpy(compatible_path)
+                    if audio_array is not None:
+                        result = self._whisper.transcribe(audio_array, **kwargs)
+                        return result["text"].strip()
+
                 result = self._whisper.transcribe(compatible_path, **kwargs)
                 return result["text"].strip()
 
@@ -2440,7 +2458,7 @@ class MessageGateway:
         adapter = self._adapters.get(message.channel)
         if adapter and hasattr(adapter, "send_typing"):
             try:
-                await adapter.send_typing(message.chat_id)
+                await adapter.send_typing(message.chat_id, thread_id=message.thread_id)
             except Exception:
                 pass  # 忽略 typing 发送失败
 
@@ -2802,6 +2820,7 @@ class MessageGateway:
                             await adapter.send_text(
                                 chat_id=original.chat_id,
                                 text=f"消息发送失败（第 {i + 1}/{len(messages)} 段），请稍后重试。",
+                                reply_to=original.thread_id or original.channel_message_id,
                                 metadata=outgoing_meta,
                             )
 
@@ -2985,6 +3004,11 @@ class MessageGateway:
         """
         发送消息到会话
         """
+        # 话题感知：session 关联了话题且调用者未显式指定 reply_to 时，
+        # 自动使用 thread_id 使消息留在话题内（飞书等平台需要 reply 才能定位到话题）
+        if session.thread_id and "reply_to" not in kwargs:
+            kwargs["reply_to"] = session.thread_id
+
         result = await self.send(
             channel=session.channel,
             chat_id=session.chat_id,

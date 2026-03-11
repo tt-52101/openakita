@@ -269,10 +269,13 @@ class ChannelAdapter(ABC):
         """
         raise NotImplementedError(f"{self.channel_name} does not support send_voice")
 
-    async def send_typing(self, chat_id: str) -> None:
+    async def send_typing(self, chat_id: str, thread_id: str | None = None) -> None:
         """发送正在输入状态"""
         # 可选能力：默认实现为 no-op（部分平台不支持 typing 或无需实现）
         logger.debug(f"{self.channel_name}: typing (noop) chat_id={chat_id}")
+
+    async def clear_typing(self, chat_id: str, thread_id: str | None = None) -> None:
+        """清除 typing 状态提示（如有）。默认 no-op。"""
 
     # ==================== 辅助方法 ====================
 
