@@ -105,6 +105,11 @@ async def create_bot(body: BotCreateRequest):
     settings.im_bots = list(settings.im_bots) + [bot]
     runtime_state.save()
     logger.info(f"[Agents API] Created bot: {body.id}")
+
+    if bot.get("enabled", True):
+        from openakita.main import apply_im_bot
+        await apply_im_bot(bot)
+
     return {"status": "ok", "bot": bot}
 
 
@@ -139,6 +144,13 @@ async def update_bot(bot_id: str, body: BotUpdateRequest):
     settings.im_bots = bots
     runtime_state.save()
     logger.info(f"[Agents API] Updated bot: {bot_id}")
+
+    from openakita.main import apply_im_bot, remove_im_bot
+    if bot.get("enabled", True):
+        await apply_im_bot(bot)
+    else:
+        await remove_im_bot(bot)
+
     return {"status": "ok", "bot": bot}
 
 
@@ -148,6 +160,7 @@ async def delete_bot(bot_id: str):
     from openakita.config import runtime_state, settings
 
     bots = list(settings.im_bots)
+    deleted = [b for b in bots if isinstance(b, dict) and b.get("id") == bot_id]
     new_bots = [b for b in bots if isinstance(b, dict) and b.get("id") != bot_id]
     if len(new_bots) == len(bots):
         raise HTTPException(status_code=404, detail=f"bot '{bot_id}' not found")
@@ -155,6 +168,11 @@ async def delete_bot(bot_id: str):
     settings.im_bots = new_bots
     runtime_state.save()
     logger.info(f"[Agents API] Deleted bot: {bot_id}")
+
+    if deleted:
+        from openakita.main import remove_im_bot
+        await remove_im_bot(deleted[0])
+
     return {"status": "ok"}
 
 
@@ -174,6 +192,13 @@ async def toggle_bot(bot_id: str, body: BotToggleRequest):
     settings.im_bots = bots
     runtime_state.save()
     logger.info(f"[Agents API] Toggled bot {bot_id}: enabled={body.enabled}")
+
+    from openakita.main import apply_im_bot, remove_im_bot
+    if body.enabled:
+        await apply_im_bot(bot)
+    else:
+        await remove_im_bot(bot)
+
     return {"status": "ok", "bot": bot}
 
 
