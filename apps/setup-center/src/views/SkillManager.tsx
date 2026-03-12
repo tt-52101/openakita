@@ -1098,14 +1098,19 @@ export function SkillManager({
     } catch (e) {
       const msg = String(e);
       if (msg.includes("该技能已安装") || msg.toLowerCase().includes("already installed")) {
-        setMarketplace((prev) => prev.map((s) =>
-          s.url === skill.url ? { ...s, installed: true } : s
-        ));
-        await loadSkills();
-        onNotice?.(t("skills.alreadyInstalled"));
-        setTab("installed");
+        const refreshed = await loadSkills();
+        if (refreshed) {
+          setMarketplace((prev) => prev.map((s) =>
+            s.url === skill.url ? { ...s, installed: true } : s
+          ));
+          onNotice?.(t("skills.alreadyInstalled"));
+          setTab("installed");
+        } else {
+          setError(msg);
+        }
       } else {
         setError(msg);
+        onNotice?.(msg);
       }
     } finally {
       setInstallingSet(prev => { const next = new Set(prev); next.delete(uniqueKey); return next; });
@@ -1165,6 +1170,7 @@ export function SkillManager({
         setTab("installed");
       } else {
         setError(msg);
+        onNotice?.(msg);
       }
     } finally {
       setManualInstalling(false);
