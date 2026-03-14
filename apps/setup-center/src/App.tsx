@@ -33,7 +33,8 @@ import {
   DotGreen, DotGray, DotYellow, DotRed,
   LogoTelegram, LogoFeishu, LogoWework, LogoDingtalk, LogoQQ,
 } from "./icons";
-import { ChevronDownIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, XIcon, Loader2, RefreshCw, Play, Square, RotateCcw, Power, PowerOff, FolderOpen, Activity, ArrowRight, Server, Download, Zap } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -3840,14 +3841,13 @@ export function App() {
                 {t("status.backendNotRunningHint")}
               </div>
             </div>
-            <button
-              className="btnSmall btnSmallPrimary"
-              style={{ padding: "8px 20px", fontSize: 14, fontWeight: 600, whiteSpace: "nowrap" }}
+            <Button
+              size="sm"
               onClick={async () => { await startLocalServiceWithConflictCheck(effectiveWsId); }}
               disabled={!!busy}
             >
-              {busy || t("topbar.start")}
-            </button>
+              {busy ? <><Loader2 className="animate-spin mr-1" size={14} />{busy}</> : <><Play size={14} className="mr-1" />{t("topbar.start")}</>}
+            </Button>
           </div>
         )}
         {/* Banner: auto-starting backend (shown while serviceStatus is null and busy with auto-start) */}
@@ -3870,33 +3870,54 @@ export function App() {
           </div>
         )}
 
-        {/* Top row: service + system info */}
-        <div className="statusGrid3">
-          {/* Service */}
-          <div className="statusCard">
-            <div className="statusCardHead">
-              <span className="statusCardLabel">{t("status.service")}</span>
-              {serviceStatus === null ? <DotYellow /> : heartbeatState === "alive" ? <DotGreen /> : heartbeatState === "degraded" ? <DotYellow /> : heartbeatState === "suspect" ? <DotYellow /> : serviceStatus?.running ? <DotGreen /> : <DotGray />}
+        {/* Top: Unified status panel */}
+        <div className="statusPanel">
+          {/* Service row */}
+          <div className="statusPanelRow statusPanelRowService">
+            <div className="statusPanelIcon">
+              <Server size={18} />
             </div>
-            <div className="statusCardValue">
-              {serviceStatus === null ? (busy || t("topbar.starting")) : heartbeatState === "degraded" ? t("status.unresponsive") : serviceStatus?.running ? t("topbar.running") : t("topbar.stopped")}
-              {serviceStatus?.pid ? <span className="statusCardSub"> PID {serviceStatus.pid}</span> : null}
+            <div className="statusPanelInfo">
+              <div className="statusPanelTitle">
+                {t("status.service")}
+                <Badge variant={
+                  serviceStatus === null ? "secondary"
+                  : heartbeatState === "alive" ? "default"
+                  : heartbeatState === "degraded" || heartbeatState === "suspect" ? "secondary"
+                  : serviceStatus?.running ? "default"
+                  : "outline"
+                } className={`statusBadgeInline ${
+                  serviceStatus === null ? "statusBadgeWarn"
+                  : heartbeatState === "alive" ? "statusBadgeOk"
+                  : heartbeatState === "degraded" || heartbeatState === "suspect" ? "statusBadgeWarn"
+                  : serviceStatus?.running ? "statusBadgeOk"
+                  : "statusBadgeOff"
+                }`}>
+                  {serviceStatus === null ? (busy || t("topbar.starting"))
+                  : heartbeatState === "degraded" ? t("status.unresponsive")
+                  : serviceStatus?.running ? t("topbar.running")
+                  : t("topbar.stopped")}
+                </Badge>
+              </div>
+              <div className="statusPanelDesc">
+                {serviceStatus?.pid ? `PID ${serviceStatus.pid}` : ""}
+              </div>
             </div>
             {IS_TAURI && (
-            <div className="statusCardActions">
+            <div className="statusPanelActions">
               {!serviceStatus?.running && serviceStatus !== null && effectiveWsId && (
-                <button className="btnSmall btnSmallPrimary" onClick={async () => {
+                <Button size="sm" className="statusBtn" onClick={async () => {
                   await startLocalServiceWithConflictCheck(effectiveWsId);
-                }} disabled={!!busy}>{busy || t("topbar.start")}</button>
+                }} disabled={!!busy}>{busy ? <><Loader2 className="animate-spin" size={13} />{busy}</> : <><Play size={13} />{t("topbar.start")}</>}</Button>
               )}
               {serviceStatus?.running && effectiveWsId && (<>
-                <button className="btnSmall btnSmallDanger" onClick={async () => {
+                <Button size="sm" variant="destructive" className="statusBtn" onClick={async () => {
                   const _b = notifyLoading(t("status.stopping"));
                   try {
                     await doStopService(effectiveWsId);
                   } catch (e) { notifyError(String(e)); } finally { dismissLoading(_b); }
-                }} disabled={!!busy}>{t("status.stop")}</button>
-                <button className="btnSmall" onClick={async () => {
+                }} disabled={!!busy}><Square size={13} />{t("status.stop")}</Button>
+                <Button size="sm" variant="outline" className="statusBtn" onClick={async () => {
                   const _b = notifyLoading(t("status.restarting"));
                   try {
                     await doStopService(effectiveWsId);
@@ -3904,56 +3925,67 @@ export function App() {
                     dismissLoading(_b);
                     await doStartLocalService(effectiveWsId);
                   } catch (e) { notifyError(String(e)); dismissLoading(_b); }
-                }} disabled={!!busy}>{t("status.restart")}</button>
+                }} disabled={!!busy}><RotateCcw size={13} />{t("status.restart")}</Button>
               </>)}
             </div>
             )}
-            {/* Multi-process warning */}
-            {IS_TAURI && detectedProcesses.length > 1 && (
-              <div style={{ marginTop: 8, padding: "6px 10px", background: "rgba(245, 158, 11, 0.15)", borderRadius: 6, fontSize: 12, color: "var(--warning)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", border: "1px solid rgba(245, 158, 11, 0.3)" }}>
-                <span style={{ fontWeight: 600 }}>⚠ 检测到 {detectedProcesses.length} 个 OpenAkita 进程正在运行</span>
-                <span style={{ color: "var(--warning)", fontSize: 11 }}>
-                  ({detectedProcesses.map(p => `PID ${p.pid}`).join(", ")})
-                </span>
-                <button className="btnSmall btnSmallDanger" style={{ marginLeft: "auto", fontSize: 11 }} onClick={async () => {
-                  const _b = notifyLoading("正在停止所有进程...");
-                  try {
-                    const stopped = await invoke<number[]>("openakita_stop_all_processes");
-                    setDetectedProcesses([]);
-                    notifySuccess(`已停止 ${stopped.length} 个进程`);
-                    // Refresh status after stopping
-                    await refreshStatus();
-                  } catch (e) { notifyError(String(e)); } finally { dismissLoading(_b); }
-                }} disabled={!!busy}>全部停止</button>
-              </div>
-            )}
-            {/* Degraded hint — process alive but HTTP unreachable */}
-            {heartbeatState === "degraded" && (
-              <div style={{ marginTop: 8, padding: "6px 10px", background: "rgba(245, 158, 11, 0.1)", borderRadius: 6, fontSize: 12, color: "var(--warning)", display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap", border: "1px solid rgba(245, 158, 11, 0.2)" }}>
-                <DotYellow size={8} />
-                <span>
-                  {t("status.degradedHint")}
-                  <br />
-                  <span style={{ fontSize: 11, color: "var(--warning)", opacity: 0.8 }}>{t("status.degradedAutoClean")}</span>
-                </span>
-              </div>
-            )}
-            {/* Troubleshooting panel */}
-            {(heartbeatState === "dead" && !serviceStatus?.running) && (
-              <TroubleshootPanel t={t} />
-            )}
           </div>
-
-          {/* Auto-update toggle — desktop only */}
-          {IS_TAURI && <div className="statusCard">
-            <div className="statusCardHead">
-              <span className="statusCardLabel">{t("status.autoUpdate")}</span>
-              {autoUpdateEnabled ? <DotGreen /> : <DotGray />}
+          {/* Multi-process warning */}
+          {IS_TAURI && detectedProcesses.length > 1 && (
+            <div className="statusPanelAlert">
+              <span style={{ fontWeight: 600 }}>⚠ 检测到 {detectedProcesses.length} 个 OpenAkita 进程正在运行</span>
+              <span style={{ fontSize: 11, opacity: 0.8 }}>
+                ({detectedProcesses.map(p => `PID ${p.pid}`).join(", ")})
+              </span>
+              <Button size="sm" variant="destructive" style={{ marginLeft: "auto" }} onClick={async () => {
+                const _b = notifyLoading("正在停止所有进程...");
+                try {
+                  const stopped = await invoke<number[]>("openakita_stop_all_processes");
+                  setDetectedProcesses([]);
+                  notifySuccess(`已停止 ${stopped.length} 个进程`);
+                  await refreshStatus();
+                } catch (e) { notifyError(String(e)); } finally { dismissLoading(_b); }
+              }} disabled={!!busy}><Square size={12} className="mr-1" />全部停止</Button>
             </div>
-            <div className="statusCardValue">{autoUpdateEnabled ? t("status.on") : t("status.off")}</div>
-            <div className="statusCardSub">{t("status.autoUpdateHint")}</div>
-            <div className="statusCardActions">
-              <button className="btnSmall" onClick={async () => {
+          )}
+          {/* Degraded hint */}
+          {heartbeatState === "degraded" && (
+            <div className="statusPanelAlert">
+              <DotYellow size={8} />
+              <span>
+                {t("status.degradedHint")}
+                <br />
+                <span style={{ fontSize: 11, opacity: 0.8 }}>{t("status.degradedAutoClean")}</span>
+              </span>
+            </div>
+          )}
+          {/* Troubleshooting panel */}
+          {(heartbeatState === "dead" && !serviceStatus?.running) && (
+            <TroubleshootPanel t={t} />
+          )}
+
+          {/* Auto-update row — desktop only */}
+          {IS_TAURI && (
+          <div className="statusPanelRow">
+            <div className="statusPanelIcon">
+              <Download size={18} />
+            </div>
+            <div className="statusPanelInfo">
+              <div className="statusPanelTitle">
+                {t("status.autoUpdate")}
+                <Badge variant={autoUpdateEnabled ? "default" : "outline"} className={`statusBadgeInline ${autoUpdateEnabled ? "statusBadgeOk" : "statusBadgeOff"}`}>
+                  {autoUpdateEnabled ? t("status.on") : t("status.off")}
+                </Badge>
+              </div>
+              <div className="statusPanelDesc">{t("status.autoUpdateHint")}</div>
+            </div>
+            <div className="statusPanelActions">
+              <Button size="sm" variant="outline" className={cn(
+                "h-7 text-xs px-2.5",
+                autoUpdateEnabled
+                  ? "bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100 hover:text-amber-700 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800 dark:hover:bg-amber-900"
+                  : "bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800 dark:hover:bg-emerald-900",
+              )} onClick={async () => {
                 const _b = notifyLoading(t("common.loading"));
                 try {
                   const next = !autoUpdateEnabled;
@@ -3961,49 +3993,67 @@ export function App() {
                   setAutoUpdateEnabled(next);
                   if (!next) { setNewRelease(null); setUpdateAvailable(null); setUpdateProgress({ status: "idle" }); }
                 } catch (e) { notifyError(String(e)); } finally { dismissLoading(_b); }
-              }} disabled={autoUpdateEnabled === null || !!busy}>{autoUpdateEnabled ? t("status.off") : t("status.on")}</button>
+              }} disabled={autoUpdateEnabled === null || !!busy}>{autoUpdateEnabled ? <PowerOff size={12} /> : <Power size={12} />}{autoUpdateEnabled ? t("status.off") : t("status.on")}</Button>
             </div>
-          </div>}
+          </div>
+          )}
 
-          {/* Autostart (= desktop autostart + backend auto-launch) — desktop only */}
-          {IS_TAURI && <div className="statusCard">
-            <div className="statusCardHead">
-              <span className="statusCardLabel">{t("status.autostart")}</span>
-              {autostartEnabled ? <DotGreen /> : <DotGray />}
+          {/* Autostart row — desktop only */}
+          {IS_TAURI && (
+          <div className="statusPanelRow">
+            <div className="statusPanelIcon">
+              <Zap size={18} />
             </div>
-            <div className="statusCardValue">{autostartEnabled ? t("status.on") : t("status.off")}</div>
-            <div className="statusCardSub">{t("status.autostartHint")}</div>
-            <div className="statusCardActions">
-              <button className="btnSmall" onClick={async () => {
+            <div className="statusPanelInfo">
+              <div className="statusPanelTitle">
+                {t("status.autostart")}
+                <Badge variant={autostartEnabled ? "default" : "outline"} className={`statusBadgeInline ${autostartEnabled ? "statusBadgeOk" : "statusBadgeOff"}`}>
+                  {autostartEnabled ? t("status.on") : t("status.off")}
+                </Badge>
+              </div>
+              <div className="statusPanelDesc">{t("status.autostartHint")}</div>
+            </div>
+            <div className="statusPanelActions">
+              <Button size="sm" variant="outline" className={cn(
+                "h-7 text-xs px-2.5",
+                autostartEnabled
+                  ? "bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100 hover:text-amber-700 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800 dark:hover:bg-amber-900"
+                  : "bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800 dark:hover:bg-emerald-900",
+              )} onClick={async () => {
                 const _b = notifyLoading(t("common.loading"));
                 try { const next = !autostartEnabled; await invoke("autostart_set_enabled", { enabled: next }); setAutostartEnabled(next); } catch (e) { notifyError(String(e)); } finally { dismissLoading(_b); }
-              }} disabled={autostartEnabled === null || !!busy}>{autostartEnabled ? t("status.off") : t("status.on")}</button>
+              }} disabled={autostartEnabled === null || !!busy}>{autostartEnabled ? <PowerOff size={12} /> : <Power size={12} />}{autostartEnabled ? t("status.off") : t("status.on")}</Button>
             </div>
-          </div>}
+          </div>
+          )}
 
-          {/* Workspace */}
-          <div className="statusCard" style={{ gridColumn: "1 / -1" }}>
-            <div className="statusCardHead">
-              <span className="statusCardLabel">{t("config.step.workspace")}</span>
+          {/* Workspace row */}
+          <div className="statusPanelRow statusPanelRowWs">
+            <div className="statusPanelIcon">
+              <FolderOpen size={18} />
             </div>
-            <div className="statusCardValue">{currentWorkspaceId || "—"}</div>
-            <div className="statusCardSub" style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{ws?.path || ""}</span>
-              {ws?.path && (
-                <button
-                  className="btnIconInline"
-                  title={t("status.openFolder")}
-                  onClick={async () => {
-                    const { openFileWithDefault } = await import("./platform");
-                    try { await openFileWithDefault(ws.path); } catch (e) { logger.error("App", "openFileWithDefault failed", { error: String(e) }); }
-                  }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                  </svg>
-                </button>
-              )}
+            <div className="statusPanelInfo" style={{ flex: 1, minWidth: 0 }}>
+              <div className="statusPanelTitle">{t("config.step.workspace")}</div>
+              <div className="statusPanelDesc" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontWeight: 600, color: "var(--fg)" }}>{currentWorkspaceId || "—"}</span>
+                <span style={{ opacity: 0.5 }}>·</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{ws?.path || ""}</span>
+              </div>
             </div>
+            {ws?.path && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                title={t("status.openFolder")}
+                onClick={async () => {
+                  const { openFileWithDefault } = await import("./platform");
+                  try { await openFileWithDefault(ws.path); } catch (e) { logger.error("App", "openFileWithDefault failed", { error: String(e) }); }
+                }}
+              >
+                <FolderOpen size={14} />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -4011,11 +4061,10 @@ export function App() {
         <div className="card" style={{ marginTop: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <span className="statusCardLabel">{t("status.llmEndpoints")} ({endpointSummary.length})</span>
-            <button className="btnSmall" onClick={async () => {
+            <Button size="sm" variant="outline" onClick={async () => {
               setHealthChecking("all");
               try {
                 let results: Array<{ name: string; status: string; latency_ms: number | null; error: string | null; error_category: string | null; consecutive_failures: number; cooldown_remaining: number; is_extended_cooldown: boolean; last_checked_at: string | null }>;
-                // health-check 必须走后端 HTTP API
                 const healthUrl = shouldUseHttpApi() ? httpApiBase() : null;
                 if (healthUrl) {
                   const res = await safeFetch(`${healthUrl}/api/health/check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}), signal: AbortSignal.timeout(60_000) });
@@ -4031,20 +4080,23 @@ export function App() {
                 setEndpointHealth(h);
               } catch (e) { notifyError(String(e)); } finally { setHealthChecking(null); }
             }} disabled={!!healthChecking || !!busy}>
-              {healthChecking === "all" ? t("status.checking") : t("status.checkAll")}
-            </button>
+              {healthChecking === "all" ? <><Loader2 className="animate-spin mr-1" size={14} />{t("status.checking")}</> : <><Activity size={14} className="mr-1" />{t("status.checkAll")}</>}
+            </Button>
           </div>
           {endpointSummary.length === 0 ? (
             <div className="cardHint">{t("status.noEndpoints")}</div>
           ) : (
-            <div className="epTable">
-              <div className="epTableHeader">
-                <span>{t("status.endpoint")}</span>
-                <span>{t("status.model")}</span>
-                <span>Key</span>
-                <span>{t("sidebar.status")}</span>
-                <span></span>
-              </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="h-9 text-xs">{t("status.endpoint")}</TableHead>
+                  <TableHead className="h-9 text-xs">{t("status.model")}</TableHead>
+                  <TableHead className="h-9 text-xs w-[50px]">Key</TableHead>
+                  <TableHead className="h-9 text-xs">{t("sidebar.status")}</TableHead>
+                  <TableHead className="h-9 text-xs w-[70px]"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
               {endpointSummary.map((e) => {
                 const h = endpointHealth[e.name];
                 const dotClass = h ? (h.status === "healthy" ? "healthy" : h.status === "degraded" ? "degraded" : "unhealthy") : e.keyPresent ? "unknown" : "unhealthy";
@@ -4053,45 +4105,52 @@ export function App() {
                   ? h.status === "healthy" ? (h.latencyMs != null ? h.latencyMs + "ms" : "OK") : fullError.slice(0, 30) + (fullError.length > 30 ? "…" : "")
                   : e.keyPresent ? "—" : t("status.keyMissing");
                 return (
-                  <div key={e.name} className="epTableRow" style={e.enabled === false ? { opacity: 0.45 } : undefined}>
-                    <span className="epTableName">
+                  <TableRow key={e.name} className={e.enabled === false ? "opacity-45" : ""}>
+                    <TableCell className="py-2.5 font-semibold">
                       {e.name}
-                      {e.enabled === false && <span style={{ marginLeft: 6, color: "var(--muted)", fontSize: 10, fontWeight: 700 }}>{t("llm.disabled")}</span>}
-                    </span>
-                    <span className="epTableModel">{e.model}</span>
-                    <span>{e.keyPresent ? <DotGreen /> : <DotGray />}</span>
-                    <span style={{ display: "flex", alignItems: "center", gap: 4 }} title={fullError ? (t("status.clickToCopy", "点击复制") + ": " + fullError) : undefined}>
-                      <span className={"healthDot " + dotClass} />
+                      {e.enabled === false && <span className="ml-1.5 text-muted-foreground text-[10px] font-bold">{t("llm.disabled")}</span>}
+                    </TableCell>
+                    <TableCell className="py-2.5 text-muted-foreground text-xs">{e.model}</TableCell>
+                    <TableCell className="py-2.5">{e.keyPresent ? <DotGreen /> : <DotGray />}</TableCell>
+                    <TableCell className="py-2.5">
                       <span
-                        className="epTableStatus"
-                        style={fullError ? { cursor: "pointer" } : undefined}
-                        onClick={fullError ? async (e) => { e.stopPropagation(); const ok = await copyToClipboard(fullError); if (ok) notifySuccess(t("version.copied")); } : undefined}
-                        role={fullError ? "button" : undefined}
+                        className="inline-flex items-center gap-1 text-xs"
+                        title={fullError ? (t("status.clickToCopy", "点击复制") + ": " + fullError) : undefined}
                       >
-                        {label}
+                        <span className={"healthDot " + dotClass} />
+                        <span
+                          className={fullError ? "cursor-pointer" : ""}
+                          onClick={fullError ? async (ev) => { ev.stopPropagation(); const ok = await copyToClipboard(fullError); if (ok) notifySuccess(t("version.copied")); } : undefined}
+                          role={fullError ? "button" : undefined}
+                        >
+                          {label}
+                        </span>
                       </span>
-                    </span>
-                    <button className="btnSmall" onClick={async () => {
-                      setHealthChecking(e.name);
-                      try {
-                        let r: any[];
-                        const healthUrl = shouldUseHttpApi() ? httpApiBase() : null;
-                        if (healthUrl) {
-                          const res = await safeFetch(`${healthUrl}/api/health/check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ endpoint_name: e.name }), signal: AbortSignal.timeout(60_000) });
-                          const data = await res.json();
-                          r = data.results || [];
-                        } else {
-                          notifyError(t("status.needServiceRunning"));
-                          setHealthChecking(null);
-                          return;
-                        }
-                        if (r[0]) setEndpointHealth((prev: any) => ({ ...prev, [r[0].name]: { status: r[0].status, latencyMs: r[0].latency_ms, error: r[0].error, errorCategory: r[0].error_category, consecutiveFailures: r[0].consecutive_failures, cooldownRemaining: r[0].cooldown_remaining, isExtendedCooldown: r[0].is_extended_cooldown, lastCheckedAt: r[0].last_checked_at } }));
-                      } catch (err) { notifyError(String(err)); } finally { setHealthChecking(null); }
-                    }} disabled={!!healthChecking || !!busy}>{healthChecking === e.name ? "..." : t("status.check")}</button>
-                  </div>
+                    </TableCell>
+                    <TableCell className="py-2.5 text-right">
+                      <Button size="sm" variant="outline" className="h-7 text-xs px-2.5" onClick={async () => {
+                        setHealthChecking(e.name);
+                        try {
+                          let r: any[];
+                          const healthUrl = shouldUseHttpApi() ? httpApiBase() : null;
+                          if (healthUrl) {
+                            const res = await safeFetch(`${healthUrl}/api/health/check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ endpoint_name: e.name }), signal: AbortSignal.timeout(60_000) });
+                            const data = await res.json();
+                            r = data.results || [];
+                          } else {
+                            notifyError(t("status.needServiceRunning"));
+                            setHealthChecking(null);
+                            return;
+                          }
+                          if (r[0]) setEndpointHealth((prev: any) => ({ ...prev, [r[0].name]: { status: r[0].status, latencyMs: r[0].latency_ms, error: r[0].error, errorCategory: r[0].error_category, consecutiveFailures: r[0].consecutive_failures, cooldownRemaining: r[0].cooldown_remaining, isExtendedCooldown: r[0].is_extended_cooldown, lastCheckedAt: r[0].last_checked_at } }));
+                        } catch (err) { notifyError(String(err)); } finally { setHealthChecking(null); }
+                      }} disabled={!!healthChecking || !!busy}>{healthChecking === e.name ? <Loader2 className="animate-spin" size={14} /> : t("status.check")}</Button>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </div>
+              </TableBody>
+            </Table>
           )}
         </div>
 
@@ -4100,7 +4159,7 @@ export function App() {
           <div className="card" style={{ marginTop: 0 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <span className="statusCardLabel">{t("status.imChannels")}</span>
-              <button className="btnSmall" onClick={async () => {
+              <Button size="sm" variant="outline" onClick={async () => {
                 setImChecking(true);
                 try {
                   const healthUrl = shouldUseHttpApi() ? httpApiBase() : null;
@@ -4118,8 +4177,8 @@ export function App() {
                   }
                 } catch (err) { notifyError(String(err)); } finally { setImChecking(false); }
               }} disabled={imChecking || !!busy}>
-                {imChecking ? "..." : t("status.checkAll")}
-              </button>
+                {imChecking ? <><Loader2 className="animate-spin mr-1" size={14} />{t("status.checking")}</> : <><Activity size={14} className="mr-1" />{t("status.checkAll")}</>}
+              </Button>
             </div>
             {imStatus.map((c) => {
               const channelId = c.k.replace("_ENABLED", "").toLowerCase();
@@ -4146,7 +4205,7 @@ export function App() {
                 <div className="statusMetric"><span>{t("skills.external")}</span><b>{skillSummary.externalCount}</b></div>
               </div>
             ) : <div className="cardHint" style={{ marginTop: 8 }}>{t("status.skillsNA")}</div>}
-            <button className="btnSmall" style={{ marginTop: 10, width: "100%" }} onClick={() => setView("skills")}>{t("status.manageSkills")}</button>
+            <Button size="sm" variant="outline" className="w-full mt-2.5" onClick={() => setView("skills")}>{t("status.manageSkills")} <ArrowRight size={14} className="ml-1" /></Button>
           </div>
         </div>
 
@@ -4155,7 +4214,7 @@ export function App() {
           <div className="card" style={{ marginTop: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <span className="statusCardLabel">{t("status.log")}</span>
-              <button className="btnSmall" onClick={() => { const wsId = effectiveWsId || (dataMode === "remote" ? "__remote__" : null); if (wsId) refreshServiceLog(wsId); }}>{t("topbar.refresh")}</button>
+              <Button size="sm" variant="outline" onClick={() => { const wsId = effectiveWsId || (dataMode === "remote" ? "__remote__" : null); if (wsId) refreshServiceLog(wsId); }}><RefreshCw size={14} className="mr-1" />{t("topbar.refresh")}</Button>
             </div>
             <pre ref={serviceLogRef} className="logPre">{(serviceLog?.content || "").trim() || t("status.noLog")}</pre>
           </div>
