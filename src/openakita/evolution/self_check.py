@@ -294,11 +294,13 @@ class SelfChecker:
         self,
         brain: Brain,
         test_dir: Path | None = None,
+        memory_manager=None,
     ):
         self.brain = brain
         self.test_dir = test_dir or (
             settings.project_root / "src" / "openakita" / "testing" / "cases"
         )
+        self._memory_manager = memory_manager
         self.shell = ShellTool()
         self.file_tool = FileTool()
 
@@ -902,14 +904,16 @@ ID: {result.test_id}
         try:
             from ..memory import MemoryManager, MemoryType
 
-            memory_manager = MemoryManager(
-                data_dir=settings.project_root / "data" / "memory",
-                memory_md_path=settings.memory_path,
-                search_backend=settings.search_backend,
-                embedding_api_provider=settings.embedding_api_provider,
-                embedding_api_key=settings.embedding_api_key,
-                embedding_api_model=settings.embedding_api_model,
-            )
+            memory_manager = self._memory_manager
+            if memory_manager is None:
+                memory_manager = MemoryManager(
+                    data_dir=settings.project_root / "data" / "memory",
+                    memory_md_path=settings.memory_path,
+                    search_backend=settings.search_backend,
+                    embedding_api_provider=settings.embedding_api_provider,
+                    embedding_api_key=settings.embedding_api_key,
+                    embedding_api_model=settings.embedding_api_model,
+                )
 
             # 提取 ERROR 类型记忆
             error_memories = memory_manager.search_memories(

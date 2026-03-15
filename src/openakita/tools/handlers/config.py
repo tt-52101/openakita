@@ -676,15 +676,18 @@ class ConfigHandler:
         import httpx
 
         # 尝试 list models 请求
+        from openakita.llm.types import normalize_base_url
+
         headers = {"Authorization": f"Bearer {api_key}"}
+        _base = normalize_base_url(target_ep.base_url)
         if target_ep.api_type == "anthropic":
             headers = {
                 "x-api-key": api_key,
                 "anthropic-version": "2023-06-01",
             }
-            test_url = target_ep.base_url.rstrip("/") + "/v1/models"
+            test_url = _base + "/v1/models"
         else:
-            test_url = target_ep.base_url.rstrip("/") + "/models"
+            test_url = _base + "/models"
 
         t0 = time.time()
         try:

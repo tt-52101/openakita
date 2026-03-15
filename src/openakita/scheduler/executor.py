@@ -663,9 +663,9 @@ class TaskExecutor:
             )
             cleanup_result = log_cleaner.cleanup()
 
-            # 2. 执行自检（传入时间范围）
+            # 2. 执行自检（传入时间范围，复用 agent 的 memory_manager 避免 DB 锁冲突）
             brain = Brain()
-            checker = SelfChecker(brain=brain)
+            checker = SelfChecker(brain=brain, memory_manager=self.memory_manager)
             report = await checker.run_daily_check(since=since)
 
             # 2.1 生成 Markdown 报告文本（用于 IM 推送）

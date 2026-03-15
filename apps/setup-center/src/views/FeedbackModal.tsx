@@ -95,6 +95,37 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
     if (!open || !captchaCfg) return;
     let destroyed = false;
 
+    // Radix Dialog (modal) sets `pointer-events: none` on <body>, which kills
+    // all interaction on elements outside the dialog portal — including the
+    // Aliyun CAPTCHA popup that renders as a direct child of <body>.
+    // Use a MutationObserver to detect captcha-related elements added to <body>
+    // and force pointer-events / z-index so the slider is draggable.
+    const liftCaptchaNode = (el: HTMLElement) => {
+      el.style.setProperty("z-index", "2147483647", "important");
+      el.style.setProperty("pointer-events", "auto", "important");
+    };
+
+    const isCaptchaNode = (el: HTMLElement): boolean => {
+      const hay = `${el.id} ${el.className}`;
+      return /captcha|slidetounlock|nc[-_]|sm[-_]/i.test(hay);
+    };
+
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node instanceof HTMLElement && node.parentElement === document.body && isCaptchaNode(node)) {
+            liftCaptchaNode(node);
+          }
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true });
+
+    // Also fix any captcha elements already in the DOM
+    document.querySelectorAll<HTMLElement>(
+      "body > div[id*='captcha' i], body > div[class*='captcha' i]",
+    ).forEach(liftCaptchaNode);
+
     const initCaptcha = async () => {
       const initFn = (window as any).initAliyunCaptcha;
       if (typeof initFn === "function") {
@@ -135,6 +166,7 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
     return () => {
       destroyed = true;
       clearTimeout(timer);
+      observer.disconnect();
       if (captchaInstanceRef.current?.destroy) {
         try { captchaInstanceRef.current.destroy(); } catch {}
       }
@@ -191,9 +223,9 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
         form.append("upload_debug", String(uploadDebug));
       } else {
         url = `${apiBase}/api/feature-request`;
-        form.append("contact_email", contactEmail.trim());
-        form.append("contact_wechat", contactWechat.trim());
       }
+      form.append("contact_email", contactEmail.trim());
+      form.append("contact_wechat", contactWechat.trim());
 
       const res = await safeFetch(url, {
         method: "POST",
@@ -239,7 +271,22 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
-      <DialogContent className="sm:max-w-[520px] p-0 gap-0 overflow-hidden" showCloseButton={true}>
+      <DialogContent
+        className="sm:max-w-[520px] p-0 gap-0 overflow-hidden"
+        showCloseButton={true}
+        onPointerDownOutside={(e) => {
+          const t = e.target as HTMLElement | null;
+          if (t?.closest?.("[class*='aliyunCaptcha'], [id*='aliyunCaptcha'], [id*='aliyun-captcha']")) {
+            e.preventDefault();
+          }
+        }}
+        onInteractOutside={(e) => {
+          const t = e.target as HTMLElement | null;
+          if (t?.closest?.("[class*='aliyunCaptcha'], [id*='aliyunCaptcha'], [id*='aliyun-captcha']")) {
+            e.preventDefault();
+          }
+        }}
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>{isBug ? t("bugReport.title") : t("featureRequest.title")}</DialogTitle>
           <DialogDescription>{isBug ? t("bugReport.title") : t("featureRequest.title")}</DialogDescription>
@@ -308,27 +355,30 @@ export function FeedbackModal({ open, onClose, apiBase, initialMode = "bug" }: F
             </div>
           )}
 
-          {/* Feature: Contact info */}
-          {!isBug && (
-            <div className="space-y-1">
-              <Label className="text-[13px]">{t("featureRequest.contactLabel")}</Label>
-              <div className="flex gap-2">
-                <Input
-                  value={contactEmail}
-                  onChange={(e) => setContactEmail(e.target.value)}
-                  placeholder={t("featureRequest.emailPlaceholder")}
-                  type="email"
-                  className="flex-1"
-                />
-                <Input
-                  value={contactWechat}
-                  onChange={(e) => setContactWechat(e.target.value)}
-                  placeholder={t("featureRequest.wechatPlaceholder")}
-                  className="flex-1"
-                />
-              </div>
+          {/* Contact info */}
+          <div className="space-y-1">
+            <Label className="text-[13px]">
+              {isBug ? t("featureRequest.contactLabel") : t("featureRequest.contactLabel")}
+            </Label>
+            {isBug && (
+              <p className="text-[11px] text-muted-foreground/70">{t("bugReport.contactHint")}</p>
+            )}
+            <div className="flex gap-2">
+              <Input
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+                placeholder={t("featureRequest.emailPlaceholder")}
+                type="email"
+                className="flex-1"
+              />
+              <Input
+                value={contactWechat}
+                onChange={(e) => setContactWechat(e.target.value)}
+                placeholder={t("featureRequest.wechatPlaceholder")}
+                className="flex-1"
+              />
             </div>
-          )}
+          </div>
 
           {/* Image upload */}
           <div className="space-y-1">

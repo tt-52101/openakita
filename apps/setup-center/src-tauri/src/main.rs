@@ -608,38 +608,88 @@ fn set_custom_root_dir(path: Option<String>, migrate: bool) -> Result<RootDirInf
         let _ = fs::remove_file(&test_file);
     }
 
-    if migrate {
-        if let Some(ref new_root) = clean_path {
-            let old_root = openakita_root_dir();
-            let new_root_path = PathBuf::from(new_root);
-            if old_root != new_root_path && old_root.exists() {
-                for entry_name in &["workspaces", "venv", "runtime", "run", "logs", "modules", "bin"] {
-                    let src = old_root.join(entry_name);
-                    let dst = new_root_path.join(entry_name);
-                    if src.exists() && src.is_dir() && !dst.exists() {
-                        if let Err(e) = copy_dir_recursive(&src, &dst) {
-                            eprintln!("migrate dir {}: {}", entry_name, e);
+    let migrate_old_root: Option<PathBuf> = if migrate {
+        let old_root = openakita_root_dir();
+        let new_root_path = match &clean_path {
+            Some(p) => PathBuf::from(p),
+            None => default_root_dir(),
+        };
+
+        if old_root != new_root_path && old_root.exists() {
+            if !new_root_path.exists() {
+                fs::create_dir_all(&new_root_path)
+                    .map_err(|e| format!("无法创建目标目录: {e}"))?;
+            }
+
+            let critical_dirs = ["workspaces"];
+            let optional_dirs = ["venv", "runtime", "run", "logs", "modules", "bin"];
+            let mut errors: Vec<String> = Vec::new();
+
+            for entry_name in critical_dirs.iter().chain(optional_dirs.iter()) {
+                let src = old_root.join(entry_name);
+                let dst = new_root_path.join(entry_name);
+                if src.exists() && src.is_dir() && !dst.exists() {
+                    if let Err(e) = copy_dir_recursive(&src, &dst) {
+                        let msg = format!("{}: {}", entry_name, e);
+                        eprintln!("migrate dir {}", msg);
+                        if critical_dirs.contains(entry_name) {
+                            let _ = fs::remove_dir_all(&dst);
+                            return Err(format!(
+                                "关键目录 {} 复制失败，已中止迁移，配置未更改。错误: {}",
+                                entry_name, e
+                            ));
                         }
-                    }
-                }
-                for file_name in &["state.json", "cli.json"] {
-                    let src = old_root.join(file_name);
-                    let dst = new_root_path.join(file_name);
-                    if src.exists() && src.is_file() && !dst.exists() {
-                        if let Err(e) = fs::copy(&src, &dst) {
-                            eprintln!("migrate file {}: {}", file_name, e);
-                        }
+                        errors.push(msg);
                     }
                 }
             }
+            for file_name in &["state.json", "cli.json"] {
+                let src = old_root.join(file_name);
+                let dst = new_root_path.join(file_name);
+                if src.exists() && src.is_file() && !dst.exists() {
+                    if let Err(e) = fs::copy(&src, &dst) {
+                        errors.push(format!("{}: {}", file_name, e));
+                        eprintln!("migrate file {}: {}", file_name, e);
+                    }
+                }
+            }
+            if !errors.is_empty() {
+                eprintln!("migration completed with {} non-critical errors", errors.len());
+            }
+
             if !new_root_path.exists() || !new_root_path.is_dir() {
                 return Err("迁移完成后目标目录不可访问，未更改配置。请检查磁盘连接后重试。".into());
             }
+            Some(old_root)
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
     let config = RootConfig { custom_root: clean_path };
     write_root_config(&config)?;
+
+    // Config updated successfully — clean up migrated entries from old root
+    if let Some(ref old_root) = migrate_old_root {
+        let dir_names = ["workspaces", "venv", "runtime", "run", "logs", "modules", "bin"];
+        let file_names = ["state.json", "cli.json"];
+        for name in &dir_names {
+            let p = old_root.join(name);
+            if p.exists() && p.is_dir() {
+                if let Err(e) = fs::remove_dir_all(&p) {
+                    eprintln!("cleanup old {}: {e}", p.display());
+                }
+            }
+        }
+        for name in &file_names {
+            let p = old_root.join(name);
+            if p.exists() && p.is_file() {
+                let _ = fs::remove_file(&p);
+            }
+        }
+    }
 
     Ok(RootDirInfo {
         default_root: default_root_dir().to_string_lossy().to_string(),
@@ -671,6 +721,153 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+// ── Workspace migration preflight ──
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct MigrateEntry {
+    name: String,
+    size_mb: f64,
+    exists_at_target: bool,
+    is_dir: bool,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct MigratePreflightInfo {
+    source_path: String,
+    source_size_mb: f64,
+    target_path: String,
+    target_free_mb: f64,
+    entries: Vec<MigrateEntry>,
+    can_migrate: bool,
+    reason: String,
+}
+
+fn available_space_mb(path: &Path) -> f64 {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use std::ffi::OsStr;
+        let wide: Vec<u16> = OsStr::new(path.to_str().unwrap_or("C:\\"))
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut free_bytes: u64 = 0;
+        unsafe {
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn GetDiskFreeSpaceExW(
+                    lpDirectoryName: *const u16,
+                    lpFreeBytesAvailableToCaller: *mut u64,
+                    lpTotalNumberOfBytes: *mut u64,
+                    lpTotalNumberOfFreeBytes: *mut u64,
+                ) -> i32;
+            }
+            GetDiskFreeSpaceExW(wide.as_ptr(), &mut free_bytes, std::ptr::null_mut(), std::ptr::null_mut());
+        }
+        free_bytes as f64 / 1024.0 / 1024.0
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        use std::mem::MaybeUninit;
+        let c_path = std::ffi::CString::new(path.to_str().unwrap_or("/")).unwrap_or_default();
+        let mut stat = MaybeUninit::<libc::statvfs>::uninit();
+        let ok = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
+        if ok == 0 {
+            let stat = unsafe { stat.assume_init() };
+            (stat.f_bavail as f64) * (stat.f_frsize as f64) / 1024.0 / 1024.0
+        } else {
+            0.0
+        }
+    }
+}
+
+#[tauri::command]
+fn preflight_migrate_root(target_path: String) -> Result<MigratePreflightInfo, String> {
+    let target = PathBuf::from(target_path.trim());
+    if !target.is_absolute() {
+        return Err("请使用绝对路径".into());
+    }
+
+    let source = openakita_root_dir();
+    if source == target {
+        return Ok(MigratePreflightInfo {
+            source_path: source.to_string_lossy().to_string(),
+            source_size_mb: 0.0,
+            target_path: target.to_string_lossy().to_string(),
+            target_free_mb: 0.0,
+            entries: vec![],
+            can_migrate: false,
+            reason: "目标路径与当前路径相同".into(),
+        });
+    }
+
+    let dir_names: &[&str] = &["workspaces", "venv", "runtime", "run", "logs", "modules", "bin"];
+    let file_names: &[&str] = &["state.json", "cli.json"];
+
+    let mut entries = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for name in dir_names {
+        let src = source.join(name);
+        if src.exists() && src.is_dir() {
+            let size = dir_size_bytes(&src);
+            total_size += size;
+            entries.push(MigrateEntry {
+                name: name.to_string(),
+                size_mb: size as f64 / 1024.0 / 1024.0,
+                exists_at_target: target.join(name).exists(),
+                is_dir: true,
+            });
+        }
+    }
+    for name in file_names {
+        let src = source.join(name);
+        if src.exists() && src.is_file() {
+            let size = src.metadata().map(|m| m.len()).unwrap_or(0);
+            total_size += size;
+            entries.push(MigrateEntry {
+                name: name.to_string(),
+                size_mb: size as f64 / 1024.0 / 1024.0,
+                exists_at_target: target.join(name).exists(),
+                is_dir: false,
+            });
+        }
+    }
+
+    let free_space_path = if target.exists() {
+        target.clone()
+    } else {
+        target.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| target.clone())
+    };
+    let target_free_mb = available_space_mb(&free_space_path);
+    let source_size_mb = total_size as f64 / 1024.0 / 1024.0;
+
+    let has_conflicts = entries.iter().any(|e| e.exists_at_target);
+    let enough_space = target_free_mb > source_size_mb * 1.1 + 100.0;
+
+    let (can_migrate, reason) = if entries.is_empty() {
+        (false, "当前数据目录为空，无需迁移".into())
+    } else if !enough_space {
+        (false, format!("目标磁盘空间不足（需要 {:.0} MB，可用 {:.0} MB）", source_size_mb * 1.1, target_free_mb))
+    } else if has_conflicts {
+        (true, "目标路径已存在部分数据，已有数据将被跳过".into())
+    } else {
+        (true, "可以迁移".into())
+    };
+
+    Ok(MigratePreflightInfo {
+        source_path: source.to_string_lossy().to_string(),
+        source_size_mb,
+        target_path: target.to_string_lossy().to_string(),
+        target_free_mb,
+        entries,
+        can_migrate,
+        reason,
+    })
 }
 
 #[tauri::command]
@@ -917,7 +1114,7 @@ fn factory_reset() -> Result<String, String> {
 
     // 2. Determine root and build list of paths to remove
     let root = openakita_root_dir();
-    let dirs_to_remove = ["workspaces", "venv", "runtime", "run", "logs", "modules", "bin"];
+    let dirs_to_remove = ["workspaces", "venv", "runtime", "run", "logs", "modules", "bin", "data"];
     let files_to_remove = ["state.json", "cli.json"];
 
     let mut removed = Vec::new();
@@ -2388,6 +2585,7 @@ fn main() {
             get_platform_info,
             get_root_dir_info,
             set_custom_root_dir,
+            preflight_migrate_root,
             list_workspaces,
             create_workspace,
             set_current_workspace,
@@ -2458,6 +2656,15 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = &event {
+                if !has_visible_windows {
+                    if let Some(win) = _app_handle.get_webview_window("main") {
+                        let _ = win.show();
+                        let _ = win.set_focus();
+                    }
+                }
+            }
             if let tauri::RunEvent::Exit = event {
                 // Safety-net: clean up backend processes on ANY exit path
                 // (SIGTERM, system shutdown, unexpected termination, etc.)

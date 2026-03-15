@@ -35,6 +35,7 @@ from ..types import (
     StopReason,
     TextBlock,
     Usage,
+    normalize_base_url,
 )
 from .base import LLMProvider
 from .proxy_utils import build_httpx_timeout, get_httpx_transport, get_proxy_config
@@ -74,8 +75,8 @@ class OpenAIProvider(LLMProvider):
 
     @property
     def base_url(self) -> str:
-        """获取 base URL"""
-        return self.config.base_url.rstrip("/")
+        """获取 base URL，自动剥离用户误粘贴的 OpenAI 兼容端点路径后缀。"""
+        return normalize_base_url(self.config.base_url)
 
     async def _get_client(self) -> httpx.AsyncClient:
         """获取或创建 HTTP 客户端
@@ -601,6 +602,14 @@ class OpenAIProvider(LLMProvider):
                     f"[OpenAI] Local endpoint '{self.name}': stripped thinking params {_stripped} "
                     f"(local models use native thinking mechanism, not API params)"
                 )
+
+        # ── 请求体卫生检查 ──
+        # extra_params 的 body.update() 是盲覆盖，可能将精心计算的参数（如 max_tokens）
+        # 替换为无效值。在 return 前做最终校验，确保发出的请求体始终合法。
+        for _tk in ("max_tokens", "max_completion_tokens"):
+            _tv = body.get(_tk)
+            if _tv is not None and (not isinstance(_tv, int) or _tv <= 0):
+                body.pop(_tk, None)
 
         return body
 

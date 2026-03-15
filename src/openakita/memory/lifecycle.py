@@ -16,6 +16,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
+from .storage import _is_db_locked
 from .extractor import MemoryExtractor
 from .types import (
     MEMORY_MD_MAX_CHARS,
@@ -373,6 +374,8 @@ class LifecycleManager:
                     logger.info(f"[Lifecycle] Cleaned {count} stale attachments (>{max_age_days} days, no content)")
                 return count
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"[Lifecycle] Attachment cleanup failed: {e}")
                 return 0
 
@@ -428,14 +431,23 @@ class LifecycleManager:
 
 只输出 JSON 数组，不要其他内容。"""
 
-    async def review_memories_with_llm(self) -> dict:
+    async def review_memories_with_llm(
+        self,
+        progress_callback: "Callable[[dict], None] | None" = None,
+        cancel_event: "asyncio.Event | None" = None,
+    ) -> dict:
         """
         使用 LLM 审查所有记忆，清理垃圾、合并重复、更新过期内容。
+
+        Args:
+            progress_callback: 每完成一个 batch 后调用，传入当前进度 dict
+            cancel_event: 如果 set，则在下一个 batch 前中止
 
         Returns:
             审查报告 {deleted, updated, merged, kept, errors}
         """
         import json
+        import math
         import re
 
         all_memories = self.store.load_all_memories()
@@ -449,8 +461,24 @@ class LifecycleManager:
         report = {"deleted": 0, "updated": 0, "merged": 0, "kept": 0, "errors": 0}
 
         batch_size = 15
-        for i in range(0, len(all_memories), batch_size):
+        total_batches = math.ceil(len(all_memories) / batch_size)
+
+        for batch_idx, i in enumerate(range(0, len(all_memories), batch_size)):
+            if cancel_event and cancel_event.is_set():
+                logger.info("[Lifecycle] Memory review cancelled by user")
+                break
+
             batch = all_memories[i : i + batch_size]
+
+            if progress_callback:
+                progress_callback({
+                    "phase": "llm_calling",
+                    "batch": batch_idx,
+                    "total_batches": total_batches,
+                    "total_memories": len(all_memories),
+                    "processed": i,
+                    "report": dict(report),
+                })
 
             memories_text = "\n".join(
                 f"- ID={m.id} | type={m.type.value} | score={m.importance_score:.2f} "
@@ -461,7 +489,6 @@ class LifecycleManager:
             prompt = self.MEMORY_REVIEW_PROMPT.format(memories_text=memories_text)
 
             try:
-                # Memory review is critical — use main model, not think_lightweight
                 response = await self.extractor.brain.think(
                     prompt,
                     system="你是记忆质量审查专家。只输出 JSON 数组。",
@@ -470,7 +497,7 @@ class LifecycleManager:
 
                 json_match = re.search(r"\[[\s\S]*\]", text)
                 if not json_match:
-                    logger.warning(f"[Lifecycle] LLM review batch {i // batch_size}: no JSON output")
+                    logger.warning(f"[Lifecycle] LLM review batch {batch_idx}: no JSON output")
                     report["kept"] += len(batch)
                     continue
 
@@ -479,7 +506,6 @@ class LifecycleManager:
                     report["kept"] += len(batch)
                     continue
 
-                # Guardrail: avoid catastrophic over-pruning from noisy LLM output.
                 destructive = 0
                 for d in decisions:
                     if not isinstance(d, dict):
@@ -490,7 +516,7 @@ class LifecycleManager:
                 if destructive > max(3, int(len(batch) * 0.4)):
                     logger.warning(
                         "[Lifecycle] Skip risky review batch %s: destructive=%s/%s",
-                        i // batch_size,
+                        batch_idx,
                         destructive,
                         len(batch),
                     )
@@ -541,14 +567,39 @@ class LifecycleManager:
                         report["kept"] += 1
 
             except Exception as e:
-                logger.error(f"[Lifecycle] LLM review batch {i // batch_size} failed: {e}")
+                logger.error(f"[Lifecycle] LLM review batch {batch_idx} failed: {e}")
                 report["errors"] += 1
                 report["kept"] += len(batch)
+
+            if progress_callback:
+                progress_callback({
+                    "phase": "batch_done",
+                    "batch": batch_idx + 1,
+                    "total_batches": total_batches,
+                    "total_memories": len(all_memories),
+                    "processed": min(i + batch_size, len(all_memories)),
+                    "report": dict(report),
+                })
+
+        cancelled = cancel_event.is_set() if cancel_event else False
+
+        if progress_callback:
+            progress_callback({
+                "phase": "done",
+                "batch": total_batches,
+                "total_batches": total_batches,
+                "total_memories": len(all_memories),
+                "processed": len(all_memories),
+                "report": dict(report),
+                "done": True,
+                "cancelled": cancelled,
+            })
 
         logger.info(
             f"[Lifecycle] Memory review complete: "
             f"deleted={report['deleted']}, updated={report['updated']}, "
             f"merged={report['merged']}, kept={report['kept']}"
+            f"{' (cancelled)' if cancelled else ''}"
         )
         return report
 

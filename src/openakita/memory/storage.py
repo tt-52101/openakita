@@ -29,6 +29,26 @@ logger = logging.getLogger(__name__)
 
 _SCHEMA_VERSION = 2
 
+# Process-level singleton registry: same db_path → same MemoryStorage instance
+_instance_registry: dict[str, "MemoryStorage"] = {}
+_instance_lock = threading.Lock()
+
+
+def get_shared_storage(db_path: str | Path) -> "MemoryStorage":
+    """Get or create a process-level shared MemoryStorage for the given db_path."""
+    key = str(Path(db_path).resolve())
+    with _instance_lock:
+        inst = _instance_registry.get(key)
+        if inst is not None and inst._conn is not None:
+            return inst
+        inst = MemoryStorage(db_path, _register=False)
+        _instance_registry[key] = inst
+        return inst
+
+
+def _is_db_locked(e: Exception) -> bool:
+    return isinstance(e, sqlite3.OperationalError) and "locked" in str(e).lower()
+
 
 class MemoryStorage:
     """
@@ -40,15 +60,19 @@ class MemoryStorage:
         results = storage.search_fts("代码风格")
     """
 
-    _BUSY_TIMEOUT_MS = 5000
+    _BUSY_TIMEOUT_MS = 30_000
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, *, _register: bool = True) -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
         self._write_lock = threading.RLock()
         self._lock = self._write_lock  # backward compat alias
         self._init_db()
+        if _register:
+            key = str(self._db_path.resolve())
+            with _instance_lock:
+                _instance_registry.setdefault(key, self)
 
     # ======================================================================
     # Initialization & Migration
@@ -483,6 +507,8 @@ class MemoryStorage:
                 )
                 self._conn.commit()
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to save memory to SQLite: {e}")
 
     def save_memories_batch(self, memories: list[dict]) -> None:
@@ -531,6 +557,8 @@ class MemoryStorage:
                 self._conn.commit()
                 logger.debug(f"Batch saved {len(memories)} memories to SQLite")
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to batch save memories: {e}")
 
     def load_all(
@@ -573,6 +601,8 @@ class MemoryStorage:
                 self._conn.commit()
                 return True
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to delete memory {memory_id}: {e}")
                 return False
 
@@ -608,6 +638,8 @@ class MemoryStorage:
                 self._conn.commit()
                 return True
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to update memory {memory_id}: {e}")
                 return False
 
@@ -801,6 +833,8 @@ class MemoryStorage:
                 )
                 self._conn.commit()
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to save episode: {e}")
 
     def get_episode(self, episode_id: str) -> dict | None:
@@ -888,6 +922,8 @@ class MemoryStorage:
                 self._conn.commit()
                 return True
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to update episode {episode_id}: {e}")
                 return False
 
@@ -904,6 +940,8 @@ class MemoryStorage:
                 self._conn.commit()
                 return cur.rowcount
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to link turns to episode: {e}")
                 return 0
 
@@ -948,6 +986,8 @@ class MemoryStorage:
                 )
                 self._conn.commit()
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to save scratchpad: {e}")
 
     # ======================================================================
@@ -992,6 +1032,8 @@ class MemoryStorage:
                 )
                 self._conn.commit()
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to save turn: {e}")
 
     def get_unextracted_turns(self, limit: int = 100) -> list[dict]:
@@ -1022,6 +1064,8 @@ class MemoryStorage:
                 )
                 self._conn.commit()
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to mark turns extracted: {e}")
 
     def get_session_turns(self, session_id: str) -> list[dict]:
@@ -1086,6 +1130,8 @@ class MemoryStorage:
                     logger.info(f"Deleted {deleted} conversation turns for session {session_id}")
                 return deleted
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.warning(f"Failed to delete turns for {session_id}: {e}")
                 return 0
 
@@ -1160,6 +1206,8 @@ class MemoryStorage:
                 )
                 self._conn.commit()
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to enqueue extraction: {e}")
 
     def _recover_stuck_extractions(self, stuck_timeout_minutes: int = 30) -> int:
@@ -1179,6 +1227,8 @@ class MemoryStorage:
                 logger.warning(f"[ExtractionQueue] Recovered {recovered} stuck items (>{stuck_timeout_minutes}m)")
             return recovered
         except Exception as e:
+            if _is_db_locked(e):
+                raise
             logger.error(f"Failed to recover stuck extractions: {e}")
             return 0
 
@@ -1209,6 +1259,8 @@ class MemoryStorage:
                     self._conn.commit()
                 return rows
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to dequeue extraction: {e}")
                 return []
 
@@ -1224,6 +1276,8 @@ class MemoryStorage:
                 )
                 self._conn.commit()
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to complete extraction {queue_id}: {e}")
 
     # ======================================================================
@@ -1260,6 +1314,8 @@ class MemoryStorage:
                 )
                 self._conn.commit()
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to cache embedding: {e}")
 
     # ======================================================================
@@ -1306,6 +1362,8 @@ class MemoryStorage:
                 )
                 self._conn.commit()
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to save attachment {data.get('id')}: {e}")
 
     def get_attachment(self, attachment_id: str) -> dict | None:
@@ -1386,6 +1444,8 @@ class MemoryStorage:
                 self._conn.commit()
                 return True
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to delete attachment {attachment_id}: {e}")
                 return False
 
@@ -1449,6 +1509,8 @@ class MemoryStorage:
                     logger.info(f"Cleaned up {count} expired memories")
                 return count
             except Exception as e:
+                if _is_db_locked(e):
+                    raise
                 logger.error(f"Failed to cleanup expired memories: {e}")
                 return 0
 
@@ -1457,6 +1519,10 @@ class MemoryStorage:
             if self._conn:
                 self._conn.close()
                 self._conn = None
+        key = str(self._db_path.resolve())
+        with _instance_lock:
+            if _instance_registry.get(key) is self:
+                del _instance_registry[key]
 
     # ======================================================================
     # Helpers

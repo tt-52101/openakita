@@ -10,6 +10,23 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 
+_OPENAI_ENDPOINT_SUFFIXES = ("/chat/completions", "/completions", "/embeddings", "/models")
+
+
+def normalize_base_url(url: str, *, extra_suffixes: tuple[str, ...] = ()) -> str:
+    """剥离用户误粘贴的 OpenAI 兼容端点路径后缀，返回干净的 base URL。
+
+    很多服务商（GitCode AI、火山引擎等）给出的 API 地址是完整端点 URL
+    （如 ``https://xxx/v1/chat/completions``），用户直接粘贴后拼接会产生
+    双重路径导致 404。
+    """
+    url = url.rstrip("/")
+    for suffix in (*_OPENAI_ENDPOINT_SUFFIXES, *extra_suffixes):
+        if url.endswith(suffix):
+            return url[: -len(suffix)].rstrip("/")
+    return url
+
+
 class StopReason(StrEnum):
     """停止原因"""
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { IconBrain } from "../icons";
 import { safeFetch } from "../providers";
 import { toast } from "sonner";
@@ -12,7 +12,7 @@ import {
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, RefreshCw, Trash2, Pencil, Check, X, Search, Brain } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Pencil, Check, X, Search, Brain, Ban } from "lucide-react";
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table";
 
 type MemoryItem = {
@@ -45,6 +45,19 @@ type ReviewResult = {
   merged: number;
   kept: number;
   errors: number;
+};
+
+type ReviewProgress = {
+  status: "idle" | "running" | "done" | "error" | "cancelled";
+  phase?: "llm_calling" | "batch_done" | "done";
+  batch?: number;
+  total_batches?: number;
+  total_memories?: number;
+  processed?: number;
+  report?: ReviewResult;
+  error?: string;
+  started_at?: number;
+  finished_at?: number;
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -96,6 +109,8 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
   const [editContent, setEditContent] = useState("");
   const [editScore, setEditScore] = useState(0);
   const [reviewing, setReviewing] = useState(false);
+  const [reviewProgress, setReviewProgress] = useState<ReviewProgress>({ status: "idle" });
+  const reviewPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showReviewConfirm, setShowReviewConfirm] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth <= 768);
@@ -204,30 +219,96 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
 
   const handleReviewConfirm = () => setShowReviewConfirm(true);
 
+  const stopPolling = useCallback(() => {
+    if (reviewPollRef.current) {
+      clearInterval(reviewPollRef.current);
+      reviewPollRef.current = null;
+    }
+  }, []);
+
+  const pollReviewStatus = useCallback(() => {
+    stopPolling();
+    reviewPollRef.current = setInterval(async () => {
+      try {
+        const res = await safeFetch(`${API_BASE}/api/memories/review/status`, {
+          signal: AbortSignal.timeout(5_000),
+        });
+        const data = await res.json();
+        const progress: ReviewProgress = data.progress ?? data;
+        setReviewProgress(progress);
+
+        if (progress.status === "done" || progress.status === "error" || progress.status === "cancelled") {
+          stopPolling();
+          setReviewing(false);
+          if (progress.status === "done" && progress.report) {
+            const r = progress.report;
+            toast.success(
+              `LLM 审查完成：删除 ${r.deleted}，更新 ${r.updated}，合并 ${r.merged}，保留 ${r.kept}` +
+              (r.errors > 0 ? `，错误 ${r.errors}` : "")
+            );
+          } else if (progress.status === "cancelled") {
+            toast.info("审查已取消（已处理的部分生效）");
+          } else if (progress.status === "error") {
+            toast.error(`审查出错：${progress.error || "未知错误"}`);
+          }
+          loadMemories();
+          loadStats();
+        }
+      } catch {
+        /* transient network error, keep polling */
+      }
+    }, 2_000);
+  }, [API_BASE, stopPolling, loadMemories, loadStats]);
+
+  useEffect(() => stopPolling, [stopPolling]);
+
+  useEffect(() => {
+    if (!serviceRunning) return;
+    (async () => {
+      try {
+        const res = await safeFetch(`${API_BASE}/api/memories/review/status`, {
+          signal: AbortSignal.timeout(3_000),
+        });
+        const data = await res.json();
+        if (data.status === "running") {
+          setReviewing(true);
+          setReviewProgress(data.progress ?? {});
+          pollReviewStatus();
+        }
+      } catch { /* not running */ }
+    })();
+  }, [serviceRunning, API_BASE, pollReviewStatus]);
+
   const handleReview = async () => {
     setShowReviewConfirm(false);
     setReviewing(true);
+    setReviewProgress({ status: "running" });
     try {
       const res = await safeFetch(`${API_BASE}/api/memories/review`, {
         method: "POST",
-        signal: AbortSignal.timeout(180_000),
+        signal: AbortSignal.timeout(10_000),
       });
       const data = await res.json();
-      const review: ReviewResult = data?.review ?? data;
-      if (review && typeof review.deleted === "number") {
-        toast.success(
-          `LLM 审查完成：删除 ${review.deleted}，更新 ${review.updated}，合并 ${review.merged}，保留 ${review.kept}` +
-          (review.errors > 0 ? `，错误 ${review.errors}` : "")
-        );
-        loadMemories();
-        loadStats();
-      } else {
-        toast.error("审查完成，但返回数据格式异常");
+      if (data.status === "already_running") {
+        toast.info("审查任务已在运行中");
       }
+      pollReviewStatus();
     } catch (e: any) {
-      toast.error(e.message || "审查请求失败");
-    } finally {
+      toast.error(e.message || "启动审查失败");
       setReviewing(false);
+      setReviewProgress({ status: "idle" });
+    }
+  };
+
+  const handleCancelReview = async () => {
+    try {
+      await safeFetch(`${API_BASE}/api/memories/review/cancel`, {
+        method: "POST",
+        signal: AbortSignal.timeout(5_000),
+      });
+      toast.info("正在取消审查...");
+    } catch {
+      toast.error("取消请求失败");
     }
   };
 
@@ -329,15 +410,81 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
           </Button>
         )}
 
-        <Button
-          onClick={handleReviewConfirm}
-          disabled={reviewing}
-          className="bg-gradient-to-br from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white border-0"
-        >
-          {reviewing ? <Loader2 size={14} className="animate-spin" /> : <Brain size={14} />}
-          {reviewing ? "审查中..." : isMobile ? "LLM 审查" : "LLM 智能审查"}
-        </Button>
+        {reviewing ? (
+          <Button
+            onClick={handleCancelReview}
+            variant="destructive"
+          >
+            <Ban size={14} /> 取消审查
+          </Button>
+        ) : (
+          <Button
+            onClick={handleReviewConfirm}
+            className="bg-gradient-to-br from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white border-0"
+          >
+            <Brain size={14} />
+            {isMobile ? "LLM 审查" : "LLM 智能审查"}
+          </Button>
+        )}
       </div>
+
+      {/* Review progress bar */}
+      {reviewing && reviewProgress.status === "running" && (() => {
+        const total = reviewProgress.total_batches ?? 0;
+        const isLlmCalling = reviewProgress.phase === "llm_calling";
+        const completedBatches = isLlmCalling ? (reviewProgress.batch ?? 0) : (reviewProgress.batch ?? 0);
+        const pct = total > 0
+          ? isLlmCalling
+            ? ((completedBatches + 0.5) / total) * 100
+            : (completedBatches / total) * 100
+          : 0;
+        const batchLabel = total > 0
+          ? isLlmCalling
+            ? `正在审查第 ${(reviewProgress.batch ?? 0) + 1}/${total} 批`
+            : `已完成 ${reviewProgress.batch ?? 0}/${total} 批`
+          : "准备中...";
+
+        return (
+          <div className="card" style={{ margin: 0, padding: isMobile ? "10px 12px" : "12px 16px" }}>
+            <div className="flex items-center gap-2 mb-2">
+              <Loader2 size={14} className="animate-spin text-indigo-500" />
+              <span style={{ fontSize: 13, fontWeight: 500 }}>
+                {batchLabel}
+                {isLlmCalling && <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: 6 }}>等待 LLM 返回...</span>}
+              </span>
+              {reviewProgress.total_memories ? (
+                <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: "auto" }}>
+                  {reviewProgress.processed ?? 0}/{reviewProgress.total_memories} 条记忆
+                </span>
+              ) : null}
+            </div>
+            <div style={{ position: "relative", width: "100%", height: 6, borderRadius: 3, background: "rgba(100,116,139,0.12)" }}>
+              <div style={{
+                position: "absolute", top: 0, left: 0,
+                height: "100%", borderRadius: 3, transition: "width 0.6s ease",
+                background: isLlmCalling
+                  ? "repeating-linear-gradient(90deg, #6366f1 0%, #8b5cf6 50%, #6366f1 100%)"
+                  : "linear-gradient(90deg, #6366f1, #8b5cf6)",
+                backgroundSize: isLlmCalling ? "200% 100%" : "100% 100%",
+                animation: isLlmCalling ? "reviewShimmer 1.5s linear infinite" : "none",
+                width: `${Math.min(pct, 100)}%`,
+              }} />
+            </div>
+            {reviewProgress.report && (
+              <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 11, color: "var(--muted)" }}>
+                <span>删除 <b style={{ color: "#ef4444" }}>{reviewProgress.report.deleted}</b></span>
+                <span>更新 <b style={{ color: "#f59e0b" }}>{reviewProgress.report.updated}</b></span>
+                <span>合并 <b style={{ color: "#8b5cf6" }}>{reviewProgress.report.merged}</b></span>
+                <span>保留 <b style={{ color: "#10b981" }}>{reviewProgress.report.kept}</b></span>
+                {(reviewProgress.report.errors ?? 0) > 0 && (
+                  <span>错误 <b style={{ color: "#ef4444" }}>{reviewProgress.report.errors}</b></span>
+                )}
+              </div>
+            )}
+            <style>{`@keyframes reviewShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
+          </div>
+        );
+      })()}
 
       {/* Review confirm dialog */}
       <AlertDialog open={showReviewConfirm} onOpenChange={setShowReviewConfirm}>
@@ -345,7 +492,7 @@ export function MemoryView({ serviceRunning, apiBaseUrl = "" }: Props) {
           <AlertDialogHeader>
             <AlertDialogTitle>启动 LLM 智能审查</AlertDialogTitle>
             <AlertDialogDescription>
-              将由大模型逐条审查所有记忆，删除垃圾、合并重复。此操作可能需要较长时间，请耐心等待。
+              将由大模型逐条审查所有记忆，删除垃圾、合并重复。此操作在后台异步执行，你可以随时查看进度或取消。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

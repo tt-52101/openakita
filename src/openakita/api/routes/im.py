@@ -58,6 +58,7 @@ async def list_channels(request: Request):
                     last_active = str(max(times))
         channels.append({
             "channel": name,
+            "channel_type": getattr(adapter, "channel_type", name.split(":")[0]),
             "name": getattr(adapter, "display_name", name),
             "status": status,
             "sessionCount": session_count,

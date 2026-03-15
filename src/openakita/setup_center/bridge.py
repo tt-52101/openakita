@@ -163,7 +163,9 @@ async def _list_models_openai(api_key: str, base_url: str, provider_slug: str | 
     if _is_minimax_provider():
         return _minimax_fallback_models()
 
-    url = base_url.rstrip("/") + "/models"
+    from openakita.llm.types import normalize_base_url
+
+    url = normalize_base_url(base_url) + "/models"
     # 本地服务（Ollama/LM Studio 等）不需要真实 API Key，使用 placeholder
     effective_key = api_key.strip() or "local"
     auth_header = f"Bearer {effective_key}"
@@ -907,11 +909,13 @@ def list_skills(workspace_dir: str) -> None:
                     source_url = origin_file.read_text(encoding="utf-8").strip()
             except Exception:
                 pass
+        sid = getattr(s, "skill_id", None) or s.name
         out.append({
+            "skill_id": sid,
             "name": s.name,
             "description": s.description,
             "system": bool(getattr(s, "system", False)),
-            "enabled": bool(getattr(s, "system", False)) or (external_allowlist is None) or (s.name in external_allowlist),
+            "enabled": bool(getattr(s, "system", False)) or (external_allowlist is None) or (sid in external_allowlist),
             "tool_name": getattr(s, "tool_name", None),
             "category": getattr(s, "category", None),
             "path": skill_path,

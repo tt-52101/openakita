@@ -6,7 +6,9 @@ Provides HTTP API for the frontend Memory Management Panel.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -15,6 +17,12 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/memories", tags=["memory"])
+
+# In-process review task state (single-task, no need for DB persistence)
+_review_task: asyncio.Task | None = None
+_review_cancel: asyncio.Event | None = None
+_review_progress: dict = {}
+_review_lock = asyncio.Lock()
 
 
 def _get_store(request: Request):
@@ -155,6 +163,103 @@ async def memory_stats(request: Request):
     }
 
 
+@router.post("/review")
+async def trigger_review(request: Request):
+    """Start async LLM-driven memory review. Returns immediately with task status."""
+    global _review_task, _review_cancel, _review_progress
+
+    async with _review_lock:
+        if _review_task and not _review_task.done():
+            return {"ok": True, "status": "already_running", "progress": _review_progress}
+
+        lifecycle = _get_lifecycle(request)
+        if not lifecycle:
+            raise HTTPException(503, "Lifecycle manager not available")
+
+        _review_cancel = asyncio.Event()
+        _review_progress = {
+            "status": "running",
+            "batch": 0,
+            "total_batches": 0,
+            "total_memories": 0,
+            "processed": 0,
+            "report": {"deleted": 0, "updated": 0, "merged": 0, "kept": 0, "errors": 0},
+            "started_at": time.time(),
+        }
+
+        def on_progress(data: dict) -> None:
+            _review_progress.update(data)
+
+        async def _run_review() -> None:
+            global _review_progress
+            try:
+                result = await lifecycle.review_memories_with_llm(
+                    progress_callback=on_progress,
+                    cancel_event=_review_cancel,
+                )
+
+                _review_progress["status"] = (
+                    "cancelled" if _review_progress.get("cancelled") else "done"
+                )
+                _review_progress["report"] = result
+                _review_progress["finished_at"] = time.time()
+
+                try:
+                    if lifecycle.identity_dir:
+                        lifecycle.refresh_memory_md(lifecycle.identity_dir)
+                    lifecycle._sync_vector_store()
+                    _sync_json(request)
+                except Exception as e:
+                    logger.warning(f"[MemoryAPI] Post-review sync failed: {e}")
+            except Exception as e:
+                logger.error(f"[MemoryAPI] Background review failed: {e}")
+                _review_progress["status"] = "error"
+                _review_progress["error"] = str(e)
+                _review_progress["finished_at"] = time.time()
+
+        _review_task = asyncio.create_task(_run_review())
+
+    return {"ok": True, "status": "started", "progress": _review_progress}
+
+
+@router.get("/review/status")
+async def review_status():
+    """Poll current review task progress."""
+    if not _review_task:
+        return {"status": "idle"}
+    return {"status": _review_progress.get("status", "unknown"), "progress": _review_progress}
+
+
+@router.post("/review/cancel")
+async def cancel_review():
+    """Request cancellation of the running review task."""
+    if not _review_task or _review_task.done():
+        return {"ok": False, "reason": "no_running_task"}
+    if _review_cancel:
+        _review_cancel.set()
+    return {"ok": True}
+
+
+@router.post("/batch-delete")
+async def batch_delete(request: Request):
+    data = await request.json()
+    ids = data.get("ids", [])
+    if not ids:
+        raise HTTPException(400, "No IDs provided")
+
+    store = _get_store(request)
+    if not store:
+        raise HTTPException(503, "Memory store not available")
+
+    deleted = 0
+    for mid in ids:
+        if store.delete_semantic(mid):
+            deleted += 1
+
+    _sync_json(request)
+    return {"deleted": deleted, "total": len(ids)}
+
+
 @router.get("/{memory_id}")
 async def get_memory(request: Request, memory_id: str):
     store = _get_store(request)
@@ -202,47 +307,6 @@ async def delete_memory(request: Request, memory_id: str):
         raise HTTPException(404, "Memory not found")
     _sync_json(request)
     return {"ok": True}
-
-
-@router.post("/batch-delete")
-async def batch_delete(request: Request):
-    data = await request.json()
-    ids = data.get("ids", [])
-    if not ids:
-        raise HTTPException(400, "No IDs provided")
-
-    store = _get_store(request)
-    if not store:
-        raise HTTPException(503, "Memory store not available")
-
-    deleted = 0
-    for mid in ids:
-        if store.delete_semantic(mid):
-            deleted += 1
-
-    _sync_json(request)
-    return {"deleted": deleted, "total": len(ids)}
-
-
-@router.post("/review")
-async def trigger_review(request: Request):
-    """Trigger LLM-driven memory review (same as consolidate_memories tool)."""
-    lifecycle = _get_lifecycle(request)
-    if not lifecycle:
-        raise HTTPException(503, "Lifecycle manager not available")
-
-    result = await lifecycle.review_memories_with_llm()
-
-    if lifecycle.identity_dir:
-        lifecycle.refresh_memory_md(lifecycle.identity_dir)
-
-    lifecycle._sync_vector_store()
-    _sync_json(request)
-
-    return {
-        "ok": True,
-        "review": result,
-    }
 
 
 @router.post("/refresh-md")

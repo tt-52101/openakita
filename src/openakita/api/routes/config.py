@@ -46,9 +46,13 @@ def _parse_env(content: str) -> dict[str, str]:
         key, _, value = line.partition("=")
         key = key.strip()
         value = value.strip()
-        # Strip surrounding quotes (content inside quotes is taken literally)
+        # Strip surrounding quotes; unescape only \" and \\ (produced by _quote_env_value)
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
-            value = value[1:-1]
+            inner = value[1:-1]
+            if "\\" in inner:
+                # Only unescape sequences produced by our own writer
+                inner = inner.replace("\\\\", "\x00").replace('\\"', '"').replace("\x00", "\\")
+            value = inner
         else:
             # Unquoted: strip inline comment (# preceded by whitespace)
             for sep in (" #", "\t#"):
@@ -60,8 +64,43 @@ def _parse_env(content: str) -> dict[str, str]:
     return env
 
 
-def _update_env_content(existing: str, entries: dict[str, str]) -> str:
-    """Merge entries into existing .env content (preserves comments, order)."""
+def _needs_quoting(value: str) -> bool:
+    """Check whether a .env value must be quoted to survive round-trip parsing."""
+    if not value:
+        return False
+    if value[0] in (" ", "\t") or value[-1] in (" ", "\t"):
+        return True  # leading/trailing whitespace
+    if value[0] in ('"', "'"):
+        return True  # starts with a quote char
+    for ch in (' ', '#', '"', "'", '\\'):
+        if ch in value:
+            return True
+    return False
+
+
+def _quote_env_value(value: str) -> str:
+    """Quote a .env value only when it contains characters that would be
+    mangled by typical .env parsers.  Plain values (the vast majority of
+    API keys, URLs, flags) are written unquoted for maximum compatibility
+    with older OpenAkita versions and third-party .env tooling."""
+    if not _needs_quoting(value):
+        return value
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _update_env_content(
+    existing: str,
+    entries: dict[str, str],
+    delete_keys: set[str] | None = None,
+) -> str:
+    """Merge entries into existing .env content (preserves comments, order).
+
+    - Non-empty values are written (quoted for round-trip safety).
+    - Empty string values are **ignored** (original line preserved).
+    - Keys in *delete_keys* are explicitly removed.
+    """
+    delete_keys = delete_keys or set()
     lines = existing.splitlines()
     updated_keys: set[str] = set()
     new_lines: list[str] = []
@@ -75,13 +114,16 @@ def _update_env_content(existing: str, entries: dict[str, str]) -> str:
             new_lines.append(line)
             continue
         key = stripped.split("=", 1)[0].strip()
+        if key in delete_keys:
+            updated_keys.add(key)
+            continue  # explicit delete — skip line
         if key in entries:
             value = entries[key]
             if value == "":
-                # Empty value → delete key (skip line)
-                updated_keys.add(key)
-                continue
-            new_lines.append(f"{key}={value}")
+                # Empty value → preserve the existing line (do NOT delete)
+                new_lines.append(line)
+            else:
+                new_lines.append(f"{key}={_quote_env_value(value)}")
             updated_keys.add(key)
         else:
             new_lines.append(line)
@@ -89,7 +131,7 @@ def _update_env_content(existing: str, entries: dict[str, str]) -> str:
     # Append new keys that weren't in the existing content
     for key, value in entries.items():
         if key not in updated_keys and value != "":
-            new_lines.append(f"{key}={value}")
+            new_lines.append(f"{key}={_quote_env_value(value)}")
 
     return "\n".join(new_lines) + "\n"
 
@@ -99,6 +141,7 @@ def _update_env_content(existing: str, entries: dict[str, str]) -> str:
 
 class EnvUpdateRequest(BaseModel):
     entries: dict[str, str]
+    delete_keys: list[str] = []
 
 
 class EndpointsWriteRequest(BaseModel):
@@ -160,7 +203,12 @@ async def read_env():
 
 @router.post("/api/config/env")
 async def write_env(body: EnvUpdateRequest):
-    """Update .env file with key-value entries (merge, preserving comments)."""
+    """Update .env file with key-value entries (merge, preserving comments).
+
+    - Non-empty values are upserted.
+    - Empty string values are ignored (original value preserved).
+    - Keys listed in ``delete_keys`` are explicitly removed.
+    """
     env_path = _project_root() / ".env"
     existing = ""
     if env_path.exists():
@@ -172,14 +220,17 @@ async def write_env(body: EnvUpdateRequest):
             from fastapi import HTTPException as _HE
             raise _HE(status_code=400, detail=f"Invalid env key: {key}")
 
-    new_content = _update_env_content(existing, body.entries)
+    new_content = _update_env_content(
+        existing, body.entries, delete_keys=set(body.delete_keys)
+    )
     env_path.write_text(new_content, encoding="utf-8")
     for key, value in body.entries.items():
         if value:
             os.environ[key] = value
-        elif key in os.environ:
-            del os.environ[key]
-    logger.info(f"[Config API] Updated .env with {len(body.entries)} entries")
+    for key in body.delete_keys:
+        os.environ.pop(key, None)
+    count = len([v for v in body.entries.values() if v]) + len(body.delete_keys)
+    logger.info(f"[Config API] Updated .env with {count} entries")
     return {"status": "ok", "updated_keys": list(body.entries.keys())}
 
 
@@ -511,7 +562,7 @@ async def list_models_api(body: ListModelsRequest):
         elif "403" in raw or "forbidden" in raw or "permission" in raw:
             friendly = "API Key 权限不足，请确认已开通模型访问权限"
         elif "404" in raw or "not found" in raw:
-            friendly = "API 地址有误，服务商未返回模型列表接口"
+            friendly = "该服务商不支持模型列表查询，您可以手动输入模型名称"
         elif "timeout" in raw or "timed out" in raw:
             friendly = "请求超时，请检查网络或稍后重试"
         elif len(friendly) > 150:

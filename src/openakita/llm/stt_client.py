@@ -21,7 +21,7 @@ import base64
 import logging
 from pathlib import Path
 
-from .types import EndpointConfig
+from .types import EndpointConfig, normalize_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,9 @@ class STTClient:
             logger.warning(f"[STT] No API key for endpoint {endpoint.name}")
             return None
 
-        base_url = endpoint.base_url.rstrip("/")
+        base_url = normalize_base_url(
+            endpoint.base_url, extra_suffixes=("/audio/transcriptions",)
+        )
         url = f"{base_url}/audio/transcriptions"
         model = endpoint.model or "whisper-1"
 
@@ -183,7 +185,7 @@ class STTClient:
             logger.warning(f"[STT] No API key for endpoint {endpoint.name}")
             return None
 
-        base_url = endpoint.base_url.rstrip("/")
+        base_url = normalize_base_url(endpoint.base_url)
         url = f"{base_url}/chat/completions"
 
         model = endpoint.model or "qwen3-asr-flash"

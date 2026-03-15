@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .search_backends import FTS5Backend, SearchBackend, create_search_backend
-from .storage import MemoryStorage
+from .storage import get_shared_storage
 from .types import (
     Attachment,
     Episode,
@@ -40,7 +40,7 @@ class UnifiedStore:
         api_key: str = "",
         api_model: str = "",
     ) -> None:
-        self.db = MemoryStorage(db_path)
+        self.db = get_shared_storage(db_path)
 
         if search_backend is not None:
             self.search = search_backend

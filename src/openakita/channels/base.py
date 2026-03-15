@@ -51,6 +51,15 @@ class ChannelAdapter(ABC):
         self.agent_profile_id = agent_profile_id
 
     @property
+    def channel_type(self) -> str:
+        """Base channel platform type (e.g. 'feishu', 'qqbot').
+
+        When channel_name is a multi-bot instance like 'feishu:my-bot',
+        this returns 'feishu'.  For simple names it returns channel_name as-is.
+        """
+        return self.channel_name.split(":")[0]
+
+    @property
     def is_running(self) -> bool:
         """是否运行中"""
         return self._running
