@@ -47,6 +47,7 @@ class ProfileCreateRequest(BaseModel):
     skills_mode: str = Field("all")
     custom_prompt: str = Field("", max_length=5000)
     category: str = Field("", max_length=30)
+    preferred_endpoint: str | None = Field(None, max_length=200)
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -58,6 +59,7 @@ class ProfileUpdateRequest(BaseModel):
     skills_mode: str | None = None
     custom_prompt: str | None = Field(None, max_length=5000)
     category: str | None = Field(None, max_length=30)
+    preferred_endpoint: str | None = Field(None, max_length=200)
 
 
 class ProfileVisibilityRequest(BaseModel):
@@ -332,6 +334,7 @@ async def create_agent_profile(body: ProfileCreateRequest):
         icon=body.icon,
         color=body.color,
         category=body.category,
+        preferred_endpoint=body.preferred_endpoint,
         created_by="user",
     )
 
@@ -355,7 +358,7 @@ async def update_agent_profile(profile_id: str, body: ProfileUpdateRequest):
             raise HTTPException(status_code=400, detail=f"skills_mode must be one of: {', '.join(valid_modes)}")
 
     store = ProfileStore(settings.data_dir / "agents")
-    update_data = body.model_dump(exclude_none=True)
+    update_data = body.model_dump(exclude_unset=True)
 
     try:
         updated = store.update(profile_id, update_data)
