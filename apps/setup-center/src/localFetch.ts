@@ -1,21 +1,31 @@
 /**
- * 全局 fetch 拦截：macOS WKWebView 的 fetch() 遵守系统代理设置，
- * 代理软件（Clash/V2Ray 等）运行时，对 127.0.0.1 的请求会被路由到
- * 代理服务器而非直连本地后端。
+ * Local backend fetch override — proxy-safe transport for Tauri desktop.
  *
- * 解决方案：在 Tauri 环境下，用 Tauri HTTP 插件的 fetch() 替代原生 fetch()。
- * 插件走 Rust reqwest，配合 Rust 端设置的 NO_PROXY 环境变量绕过系统代理。
- * 支持 JSON、FormData、SSE 流式响应，与原生 fetch 行为一致。
+ * On macOS, proxy software (Clash / V2Ray) sets a system-level HTTP proxy via
+ * Network Preferences.  WKWebView's native fetch() honours that proxy, causing
+ * requests to 127.0.0.1 to be routed through the external proxy server — which
+ * cannot reach the user's localhost backend.  The previous approach of routing
+ * through @tauri-apps/plugin-http suffered the same problem because its internal
+ * reqwest client reads the macOS system proxy via hyper-util/system-configuration,
+ * and NO_PROXY env var does not reliably override it.
  *
- * 仅拦截 localhost 请求，其他请求仍走浏览器原生 fetch。
- * 在非 Tauri 环境（如 `npm run dev` 的浏览器）下不做任何拦截。
+ * Fix: intercept localhost fetch() calls and route them through a dedicated Tauri
+ * IPC command (`backend_fetch`) whose reqwest client uses `.no_proxy()` — a hard
+ * switch that completely disables ALL proxy detection.  The response body is
+ * streamed back via Tauri Channel → ReadableStream, preserving SSE behaviour for
+ * the chat view.
  *
- * 注意：Tauri HTTP 插件（tauri-plugin-http）的 Rust 端在处理 AbortSignal 时
- * 存在竞态条件——信号通过 IPC abort channel 传递，可能导致 fetch_send 返回
- * "Request canceled" 错误。因此这里从 init 中剥离 signal，在 JS 侧自行处理
- * abort/timeout 逻辑，避免触发 Rust 端的 Error::RequestCanceled。
+ * Only localhost requests are intercepted; everything else uses native fetch.
+ * In non-Tauri environments (e.g. `npm run dev` in a browser) no interception
+ * is performed.
  */
+
 const LOCAL_RE = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(?:\/|$)/;
+
+type FetchStreamEvent =
+  | { event: "chunk"; data: { text: string } }
+  | { event: "done" }
+  | { event: "error"; data: { message: string } };
 
 export function installLocalFetchOverride(): void {
   if (
@@ -26,11 +36,6 @@ export function installLocalFetchOverride(): void {
   }
 
   const nativeFetch = window.fetch.bind(window);
-
-  let tauriFetchFn: typeof fetch | null = null;
-  import("@tauri-apps/plugin-http").then((mod) => {
-    tauriFetchFn = mod.fetch as typeof fetch;
-  });
 
   window.fetch = async function (
     input: RequestInfo | URL,
@@ -46,51 +51,108 @@ export function installLocalFetchOverride(): void {
       return nativeFetch(input, init);
     }
 
-    if (!tauriFetchFn) {
-      const mod = await import("@tauri-apps/plugin-http");
-      tauriFetchFn = mod.fetch as typeof fetch;
+    // Non-string bodies (FormData, Blob, etc.) can't be serialised through IPC.
+    // Fall back to native fetch for these rare cases (e.g. feedback file upload).
+    if (init?.body && typeof init.body !== "string") {
+      return nativeFetch(input, init);
     }
 
-    const signal = init?.signal;
+    const { invoke, Channel } = await import("@tauri-apps/api/core");
 
-    if (signal) {
-      // Strip signal from init — Tauri HTTP plugin's Rust-side abort channel
-      // has a race condition that causes spurious "Request canceled" errors.
-      // We handle abort externally via Promise.race instead.
-      const { signal: _stripped, ...rest } = init!;
-      const initWithoutSignal = rest as RequestInit;
-
-      if (signal.aborted) {
-        throw new DOMException(
-          signal.reason?.message || "The operation was aborted",
-          "AbortError",
-        );
-      }
-
-      return new Promise<Response>((resolve, reject) => {
-        const onAbort = () => {
-          reject(
-            new DOMException(
-              signal.reason?.message || "The operation was aborted",
-              "AbortError",
-            ),
-          );
-        };
-        signal.addEventListener("abort", onAbort, { once: true });
-
-        tauriFetchFn!(input, initWithoutSignal).then(
-          (res) => {
-            signal.removeEventListener("abort", onAbort);
-            resolve(res);
-          },
-          (err) => {
-            signal.removeEventListener("abort", onAbort);
-            reject(err);
-          },
-        );
+    const method = init?.method ?? "GET";
+    const headers: Record<string, string> = {};
+    if (init?.headers) {
+      const h =
+        init.headers instanceof Headers
+          ? init.headers
+          : new Headers(init.headers as HeadersInit);
+      h.forEach((v, k) => {
+        headers[k] = v;
       });
     }
+    const body = typeof init?.body === "string" ? init.body : null;
+    const signal = init?.signal;
 
-    return tauriFetchFn(input, init);
+    if (signal?.aborted) {
+      throw new DOMException(
+        signal.reason?.message || "The operation was aborted",
+        "AbortError",
+      );
+    }
+
+    // Channel → ReadableStream bridge: chunks arrive from Rust via IPC,
+    // are enqueued into a ReadableStream that the Response body wraps.
+    const channel = new Channel<FetchStreamEvent>();
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+    });
+
+    channel.onmessage = (msg: FetchStreamEvent) => {
+      try {
+        if (msg.event === "chunk") {
+          streamController.enqueue(encoder.encode(msg.data.text));
+        } else if (msg.event === "done") {
+          streamController.close();
+        } else if (msg.event === "error") {
+          streamController.error(new Error(msg.data.message));
+        }
+      } catch {
+        // Stream already closed/errored — ignore
+      }
+    };
+
+    const doInvoke = invoke<{ status: number; headers: Record<string, string> }>(
+      "backend_fetch",
+      {
+        onEvent: channel,
+        url,
+        method,
+        headers,
+        body,
+      },
+    );
+
+    // Handle AbortSignal: race the invoke against the abort event.
+    // If aborted, the Rust background task will eventually stop when it
+    // detects the channel is closed.
+    const metaPromise = signal
+      ? Promise.race([
+          doInvoke,
+          new Promise<never>((_resolve, reject) => {
+            const onAbort = () =>
+              reject(
+                new DOMException(
+                  signal.reason?.message || "The operation was aborted",
+                  "AbortError",
+                ),
+              );
+            signal.addEventListener("abort", onAbort, { once: true });
+            doInvoke
+              .then(() => signal.removeEventListener("abort", onAbort))
+              .catch(() => signal.removeEventListener("abort", onAbort));
+          }),
+        ])
+      : doInvoke;
+
+    try {
+      const meta = await metaPromise;
+      return new Response(stream, {
+        status: meta.status,
+        headers: meta.headers,
+      });
+    } catch (err) {
+      // Close the stream so readers don't hang
+      try {
+        streamController.error(err);
+      } catch {
+        /* already closed */
+      }
+      throw err;
+    }
   };
 }

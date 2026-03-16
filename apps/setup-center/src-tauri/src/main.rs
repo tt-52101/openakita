@@ -2724,6 +2724,7 @@ fn main() {
             fetch_pypi_versions,
             http_get_json,
             http_proxy_request,
+            backend_fetch,
             read_file_base64,
             download_file,
             show_item_in_folder,
@@ -3848,6 +3849,7 @@ fn export_workspace_backup(
     });
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(300))
+        .no_proxy()
         .build()
         .map_err(|e| format!("http client error: {e}"))?;
     let resp = client.post(&url).json(&body).send();
@@ -3979,6 +3981,7 @@ fn import_workspace_backup(
     let body = serde_json::json!({ "zip_path": zip_path });
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(300))
+        .no_proxy()
         .build()
         .map_err(|e| format!("http client error: {e}"))?;
     let resp = client.post(&url).json(&body).send();
@@ -5355,6 +5358,113 @@ async fn http_proxy_request(
     .await
 }
 
+// ── Local backend fetch (proxy-safe) ─────────────────────────────────
+//
+// On macOS, Clash / V2Ray set a *system-level* proxy via Network Preferences.
+// WKWebView's native fetch() and @tauri-apps/plugin-http's reqwest client
+// both honour that proxy, causing requests to 127.0.0.1 to be routed through
+// the external proxy server — which cannot reach the user's localhost.
+//
+// `.no_proxy()` on the reqwest Client builder **completely disables** all proxy
+// detection (env vars, system-configuration, everything) so the request always
+// goes directly to the local backend.
+//
+// The response body is streamed back to JS via a Tauri Channel, preserving
+// SSE / chunked-transfer behaviour for the chat view.
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "event", content = "data", rename_all = "camelCase")]
+enum BackendFetchEvent {
+    Chunk { text: String },
+    Done,
+    Error { message: String },
+}
+
+#[tauri::command]
+async fn backend_fetch(
+    on_event: tauri::ipc::Channel<BackendFetchEvent>,
+    url: String,
+    method: Option<String>,
+    headers: Option<std::collections::HashMap<String, String>>,
+    body: Option<String>,
+    timeout_secs: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    if !url.starts_with("http://127.0.0.1") && !url.starts_with("http://localhost") {
+        return Err("backend_fetch only allows localhost URLs".into());
+    }
+
+    let mut builder = reqwest::Client::builder()
+        .no_proxy()
+        .connect_timeout(std::time::Duration::from_secs(10));
+    if let Some(t) = timeout_secs {
+        builder = builder.timeout(std::time::Duration::from_secs(t));
+    }
+    let client = builder
+        .build()
+        .map_err(|e| format!("HTTP client error: {e}"))?;
+
+    let m = method.as_deref().unwrap_or("GET").to_uppercase();
+    let mut req = match m.as_str() {
+        "POST" => client.post(&url),
+        "PUT" => client.put(&url),
+        "DELETE" => client.delete(&url),
+        "PATCH" => client.patch(&url),
+        _ => client.get(&url),
+    };
+    if let Some(h) = headers {
+        for (k, v) in h {
+            req = req.header(&k, &v);
+        }
+    }
+    if let Some(b) = body {
+        req = req.body(b);
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HTTP {} failed ({}): {}", m, url, e))?;
+
+    let status = resp.status().as_u16();
+    let resp_headers: std::collections::HashMap<String, String> = resp
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+
+    tauri::async_runtime::spawn(async move {
+        let mut response = resp;
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    let text = String::from_utf8_lossy(&chunk).to_string();
+                    if on_event
+                        .send(BackendFetchEvent::Chunk { text })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    let _ = on_event.send(BackendFetchEvent::Done);
+                    break;
+                }
+                Err(e) => {
+                    let _ = on_event.send(BackendFetchEvent::Error {
+                        message: e.to_string(),
+                    });
+                    break;
+                }
+            }
+        }
+    });
+
+    Ok(serde_json::json!({
+        "status": status,
+        "headers": resp_headers,
+    }))
+}
+
 /// Read a file from disk and return its contents as a base64 data-URL.
 /// Used by the frontend to handle Tauri file-drop events (which provide paths, not File objects).
 #[tauri::command]
@@ -5416,9 +5526,9 @@ async fn download_file(url: String, filename: String) -> Result<String, String> 
         counter += 1;
     }
 
-    // Download (timeout 30s to avoid hanging if backend is unreachable, e.g. on macOS)
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
+        .no_proxy()
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
     let resp = client
