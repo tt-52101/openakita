@@ -4572,7 +4572,7 @@ export function App() {
             <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4" style={{ scrollbarGutter: "stable" }}>
               {/* Provider */}
               <div className="space-y-1.5">
-                <Label>{t("llm.provider")} {!["custom", "ollama", "lmstudio"].includes(providerSlug) && <span className="text-[11px] font-normal text-muted-foreground/70">API 地址：{baseUrl || selectedProvider?.default_base_url || "—"} <Button type="button" variant="link" size="xs" className="h-auto p-0 text-[11px]" onClick={() => setBaseUrlExpanded(v => !v)}>{baseUrlExpanded ? "收起" : "配置"}</Button></span>}</Label>
+                <Label className="flex items-center gap-1">{t("llm.provider")} {!["custom", "ollama", "lmstudio"].includes(providerSlug) && <span className="inline-flex items-center gap-0.5 text-[11px] font-normal text-muted-foreground/70 min-w-0"><span className="shrink-0">API 地址：</span><span className="inline-block max-w-[200px] overflow-x-auto whitespace-nowrap align-middle" style={{ scrollbarWidth: "thin" }}>{baseUrl || selectedProvider?.default_base_url || "—"}</span> <Button type="button" variant="link" size="xs" className="h-auto p-0 text-[11px] shrink-0" onClick={() => setBaseUrlExpanded(v => !v)}>{baseUrlExpanded ? "收起" : "配置"}</Button></span>}</Label>
                 <ProviderSearchSelect
                   value={providerSlug}
                   onChange={(v) => { setProviderSlug(v); setBaseUrlExpanded(false); }}
@@ -4773,7 +4773,7 @@ export function App() {
             {editDraft && <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4" style={{ scrollbarGutter: "stable" }}>
               {/* Provider (read-only) */}
               <div className="space-y-1.5">
-                <Label>{t("llm.provider")} <span className="text-[11px] font-normal text-muted-foreground/70">服务商在创建时确定，不可更改</span> {!["custom", "ollama", "lmstudio"].includes(editDraft.providerSlug) && <span className="text-[11px] font-normal text-muted-foreground/70">API 地址：{editDraft.baseUrl || "—"} <Button type="button" variant="link" size="xs" className="h-auto p-0 text-[11px]" onClick={() => setEditBaseUrlExpanded(v => !v)}>{editBaseUrlExpanded ? "收起" : "配置"}</Button></span>}</Label>
+                <Label className="flex items-center gap-1 flex-wrap">{t("llm.provider")} <span className="text-[11px] font-normal text-muted-foreground/70">服务商在创建时确定，不可更改</span> {!["custom", "ollama", "lmstudio"].includes(editDraft.providerSlug) && <span className="inline-flex items-center gap-0.5 text-[11px] font-normal text-muted-foreground/70 min-w-0"><span className="shrink-0">API 地址：</span><span className="inline-block max-w-[200px] overflow-x-auto whitespace-nowrap align-middle" style={{ scrollbarWidth: "thin" }}>{editDraft.baseUrl || "—"}</span> <Button type="button" variant="link" size="xs" className="h-auto p-0 text-[11px] shrink-0" onClick={() => setEditBaseUrlExpanded(v => !v)}>{editBaseUrlExpanded ? "收起" : "配置"}</Button></span>}</Label>
                 <Input value={(() => { const p = providers.find((x) => x.slug === editDraft.providerSlug); return p ? p.name : (editDraft.providerSlug || "custom"); })()} disabled className="opacity-70" />
               </div>
 
