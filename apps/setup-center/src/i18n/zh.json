@@ -879,7 +879,12 @@
     "custom": "自定义...",
     "prevPage": "上一页",
     "nextPage": "下一页",
-    "pageInfo": "第 {{page}} 页 / 共 {{total}} 页"
+    "pageInfo": "第 {{page}} 页 / 共 {{total}} 页",
+    "refresh": "刷新",
+    "copy": "复制",
+    "copied": "已复制",
+    "close": "关闭",
+    "confirmTitle": "确认操作"
   },
   "agentStore": {
     "subtitle": "从 OpenAkita 社区发现并安装 Agent（需要网络连接，本地导入导出不受影响）",

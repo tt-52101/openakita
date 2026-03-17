@@ -879,7 +879,12 @@
     "custom": "Custom...",
     "prevPage": "Previous",
     "nextPage": "Next",
-    "pageInfo": "Page {{page}} / {{total}}"
+    "pageInfo": "Page {{page}} / {{total}}",
+    "refresh": "Refresh",
+    "copy": "Copy",
+    "copied": "Copied",
+    "close": "Close",
+    "confirmTitle": "Confirm"
   },
   "agentStore": {
     "subtitle": "Discover and install Agents from the OpenAkita community (requires network; local import/export unaffected)",
